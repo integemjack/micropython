@@ -17,6 +17,6 @@ jobs:
         ./install.sh
         source export.sh
         
-        cd ports/esp32
+        cd ../ports/esp32
         make submodules
         make BOARD=PYDRONE
