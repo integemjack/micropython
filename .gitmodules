@@ -10,6 +10,7 @@
 [submodule "lib/berkeley-db-1.xx"]
 	path = lib/berkeley-db-1.xx
 	url = https://github.com/pfalcon/berkeley-db-1.xx
+	branch = embedded
 [submodule "lib/stm32lib"]
 	path = lib/stm32lib
 	url = https://github.com/micropython/stm32lib
