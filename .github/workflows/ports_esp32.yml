@@ -16,6 +16,9 @@ jobs:
         git submodule update --init --recursive
         ./install.sh
         source export.sh
+
+        cd ..
+        
         
         cd ../ports/esp32
         git submodule update --init --recursive
