@@ -3,20 +3,10 @@ name: esp32 port
 on: [push, workflow_dispatch]
 
 jobs:
-  build_idf402:
+  build_esp32:
     runs-on: ubuntu-20.04
     steps:
     - uses: actions/checkout@v2
-    - name: Install packages
-      run: source tools/ci.sh && ci_esp32_idf402_setup
-    - name: Build
-      run: source tools/ci.sh && ci_esp32_build
 
-  build_idf44:
-    runs-on: ubuntu-20.04
-    steps:
-    - uses: actions/checkout@v2
-    - name: Install packages
-      run: source tools/ci.sh && ci_esp32_idf44_setup
     - name: Build
-      run: source tools/ci.sh && ci_esp32_build
+      run: docker run -it -v ./ports/esp32:/project -w /project --privileged espressif/idf:v4.4 bash -c "idf.py build"
