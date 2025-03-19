@@ -24,6 +24,5 @@ jobs:
       run: |
         source ./esp-idf/export.sh
         cd ports/esp32
-        make submodules
-        make
+        git submodule update --init --recursive
         make BOARD=PYDRONE
