@@ -18,6 +18,6 @@ jobs:
         source export.sh
         
         cd ../ports/esp32
-        git submodule update --remote ../../lib/berkeley-db-1.xx
+        git submodule update --init --recursive
         make submodules
         make BOARD=PYDRONE
