@@ -18,9 +18,12 @@ jobs:
     - name: add esp-who
       run: |
         git clone -b idfv4.4 https://github.com/espressif/esp-who.git ./tmp
+        cd tmp
+        git submodule update --init --recursive
+        cd ..
         mv tmp/components/* esp-idf/components/
-        cd esp-idf/components/
-        rm -rf esp32-camera
+        # cd esp-idf/components/
+        # rm -rf esp32-camera
         
     - name: build
       run: |
