@@ -20,11 +20,12 @@ jobs:
     - name: make -C mpy-cross
       run: make -C mpy-cross
 
-    - name: cd ports/esp32
-      run: cd ports/esp32
-
     - name: make submodules
-      run: make submodules
+      run: |
+        cd ports/esp32
+        make submodules
 
     - name: make BOARD=PYDRONE
-      run: make BOARD=PYDRONE
+      run: |
+        cd ports/esp32
+        make BOARD=PYDRONE
