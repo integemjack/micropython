@@ -9,4 +9,4 @@ jobs:
     - uses: actions/checkout@v2
 
     - name: Build
-      run: docker run -it -v ./ports/esp32:/project -w /project --privileged espressif/idf:v4.4 bash -c "idf.py build"
+      run: docker run -it -v ./ports/esp32:/project -w /project espressif/idf:v4.4 bash -c "idf.py build"
