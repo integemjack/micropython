@@ -18,9 +18,13 @@ jobs:
         source export.sh
 
         cd ..
+        git clone https://github.com/espressif/esp-who.git ./tmp
+        mv tmp/components/* esp-idf/components/
+        cd esp-idf/components
+        rm -rf esp32_s3_eye_noglib
+        rm -rf who_peripherals
         
-        
-        cd ../ports/esp32
+        cd ../../ports/esp32
         git submodule update --init --recursive
         make submodules
         make BOARD=PYDRONE
