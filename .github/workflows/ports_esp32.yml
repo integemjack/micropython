@@ -17,11 +17,8 @@ jobs:
 
     - name: add esp-who
       run: |
-        git clone https://github.com/espressif/esp-who.git ./tmp
+        git clone -b idfv4.4 https://github.com/espressif/esp-who.git ./tmp
         mv tmp/components/* esp-idf/components/
-        cd esp-idf/components
-        rm -rf esp32_s3_eye_noglib
-        rm -rf who_peripherals
         
     - name: build
       run: |
