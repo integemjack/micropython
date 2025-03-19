@@ -27,6 +27,7 @@ jobs:
         
     - name: build
       run: |
+        source ./esp-idf/export.sh
         cd ports/esp32
         make submodules
         make BOARD=PYDRONE
