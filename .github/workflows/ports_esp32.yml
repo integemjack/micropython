@@ -8,5 +8,18 @@ jobs:
     steps:
     - uses: actions/checkout@v2
 
-    - name: Build
-      run: docker run -i -v .:/project -w /project espressif/idf:v4.4 bash -c "make -C mpy-cross && cd ports/esp32 && make submodules && make BOARD=GENERIC_SPIRAM"
+    - name: Init idf
+      run: |
+        git clone -b v4.0.2 --recursive https://github.com/espressif/esp-idf.git
+        cd esp-idf
+        git checkout v4.2
+        git submodule update --init --recursive
+        ./install.sh
+        source export.sh
+        
+    - name: build
+      run: |
+        make -C mpy-cross
+        cd ports/esp32
+        make submodules
+        make BOARD=PYDRONE
