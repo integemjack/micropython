@@ -8,11 +8,11 @@ jobs:
     steps:
     - uses: actions/checkout@v2
 
-    - name: install idf v4.2
+    - name: install idf v4.4
       run: |
         git clone -b v4.0.2 --recursive https://github.com/espressif/esp-idf.git
         cd esp-idf
-        git checkout v4.2
+        git checkout v4.4
         git submodule update --init --recursive
         ./install.sh
         source export.sh
