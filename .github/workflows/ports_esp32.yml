@@ -17,9 +17,14 @@ jobs:
         ./install.sh
         source export.sh
         
-    - name: build
-      run: |
-        make -C mpy-cross
-        cd ports/esp32
-        make submodules
-        make BOARD=PYDRONE
+    - name: make -C mpy-cross
+      run: make -C mpy-cross
+
+    - name: cd ports/esp32
+      run: cd ports/esp32
+
+    - name: make submodules
+      run: make submodules
+
+    - name: make BOARD=PYDRONE
+      run: make BOARD=PYDRONE
