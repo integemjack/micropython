@@ -10,10 +10,8 @@ jobs:
 
     - name: install idf v4.4
       run: |
-        git clone -b v4.0.2 --recursive https://github.com/espressif/esp-idf.git
+        git clone -b v4.4 --recursive https://github.com/espressif/esp-idf.git
         cd esp-idf
-        git checkout v4.4
-        git submodule update --init --recursive
         ./install.sh
         source export.sh
 
