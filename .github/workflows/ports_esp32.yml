@@ -25,4 +25,5 @@ jobs:
         source ./esp-idf/export.sh
         cd ports/esp32
         make submodules
+        make
         make BOARD=PYDRONE
