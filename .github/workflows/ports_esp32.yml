@@ -9,4 +9,4 @@ jobs:
     - uses: actions/checkout@v2
 
     - name: Build
-      run: docker run -i -v ./ports/esp32:/project -w /project espressif/idf:v4.4 bash -c "idf.py build"
+      run: docker run -i -v ./ports/esp32:/project -w /project espressif/idf:v4.4 bash -c "idf.py -D MICROPY_BOARD=GENERIC_SPIRAM build"
