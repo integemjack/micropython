@@ -8,7 +8,7 @@ jobs:
     steps:
     - uses: actions/checkout@v2
 
-    - name: build
+    - name: install idf v4.2
       run: |
         git clone -b v4.0.2 --recursive https://github.com/espressif/esp-idf.git
         cd esp-idf
@@ -17,14 +17,16 @@ jobs:
         ./install.sh
         source export.sh
 
-        cd ..
+    - name: add esp-who
+      run: |
         git clone https://github.com/espressif/esp-who.git ./tmp
         mv tmp/components/* esp-idf/components/
         cd esp-idf/components
         rm -rf esp32_s3_eye_noglib
         rm -rf who_peripherals
         
-        cd ../../ports/esp32
-        git submodule update --init --recursive
+    - name: build
+      run: |
+        cd ports/esp32
         make submodules
         make BOARD=PYDRONE
