@@ -31,3 +31,19 @@ jobs:
         cd ports/esp32
         # git submodule update --init --recursive
         make BOARD=PYDRONE
+
+    - name: Get current date and time
+      id: datetime
+      run: echo "::set-output name=date::$(date +'%Y.%m.%d')"
+
+    - name: Upload Prerelease
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: v${{steps.datetime.outputs.date}}
+        name: v${{steps.datetime.outputs.date}}
+        draft: false
+        prerelease: false
+        fail_on_unmatched_files: false
+        append_body: true
+        files: |
+          ports/esp32/build-PYDRONE/*.bin
