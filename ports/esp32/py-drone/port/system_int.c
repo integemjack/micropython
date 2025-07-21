@@ -42,6 +42,7 @@ void systemInit(void)
 {
 	if(isInit) return;
 	ESP_LOGI(TAG, "start systeminit ..");
+	debugpeintf("start systeminit ..\r\n");
 	
 	//初始化电源管理
 	ledseqInit();
@@ -57,11 +58,14 @@ void systemInit(void)
 	
 	// 尝试初始化光流传感器 (不影响主程序运行)
 	ESP_LOGI(TAG, "Checking for optical flow sensor...");
+	debugpeintf("Checking for optical flow sensor...\r\n");
 	opticalFlowEnabled = opticalFlowInit();
 	if (opticalFlowEnabled) {
 		ESP_LOGI(TAG, "✓ Optical flow sensor enabled and ready");
+		debugpeintf("✓ Optical flow sensor enabled and ready\r\n");
 	} else {
 		ESP_LOGI(TAG, "✗ Optical flow sensor not available - system will continue without it");
+		debugpeintf("✗ Optical flow sensor not available - system will continue without it\r\n");
 	}
 	
 	// 尝试初始化TOF传感器 (不影响主程序运行)
@@ -69,8 +73,10 @@ void systemInit(void)
 	tofSensorEnabled = tofSensorInit();
 	if (tofSensorEnabled) {
 		ESP_LOGI(TAG, "✓ TOF sensor enabled and ready");
+		debugpeintf("✓ TOF sensor enabled and ready\r\n");
 	} else {
 		ESP_LOGI(TAG, "✗ TOF sensor not available - system will continue without it");
+		debugpeintf("✗ TOF sensor not available - system will continue without it\r\n");
 	}
 	
 	// 显示传感器状态总结

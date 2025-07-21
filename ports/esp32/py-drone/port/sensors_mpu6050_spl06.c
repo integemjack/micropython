@@ -296,29 +296,68 @@ lab1:
         lpf2pInit(&gyroLpf[i], 1000, GYRO_LPF_CUTOFF_FREQ);
         lpf2pInit(&accLpf[i], 1000, ACCEL_LPF_CUTOFF_FREQ);
     }
+    
+    // 等待I2C总线稳定，确保其他传感器有足够时间启动
+    ESP_LOGI(TAG, "Waiting for I2C bus stabilization...");
+    vTaskDelay(200 / portTICK_PERIOD_MS);
+    
 #ifdef SENSORS_ENABLE_MAG_HM5883L
+    // 初始化磁力计传感器
+    ESP_LOGI(TAG, "Initializing HMC5883L magnetometer...");
     hmc5883lInit(I2C0_DEV);
+    
+    // 添加初始化后延时
+    vTaskDelay(50 / portTICK_PERIOD_MS);
 
-    if (hmc5883lTestConnection() == true) {
-        isMagnetometerPresent = true;
-        hmc5883lSetMode(QMC5883L_MODE_CONTINUOUS); // 16bit 100Hz
-        ESP_LOGI(TAG,"hmc5883l I2C connection [OK].\n");
-		debugpeintf("hmc5883l I2C connection [OK]\r\n");
-    } else {
+    // HMC5883L连接测试，带重试机制
+    bool hmc_connected = false;
+    for (int retry = 0; retry < 3 && !hmc_connected; retry++) {
+        if (retry > 0) {
+            ESP_LOGW(TAG, "HMC5883L connection retry %d/3", retry);
+            vTaskDelay(100 / portTICK_PERIOD_MS);
+        }
+        
+        if (hmc5883lTestConnection() == true) {
+            hmc_connected = true;
+            isMagnetometerPresent = true;
+            hmc5883lSetMode(QMC5883L_MODE_CONTINUOUS); // 16bit 100Hz
+            ESP_LOGI(TAG,"hmc5883l I2C connection [OK].\n");
+            debugpeintf("hmc5883l I2C connection [OK]\r\n");
+        }
+    }
+    
+    if (!hmc_connected) {
         ESP_LOGE(TAG,"hmc5883l I2C connection [FAIL].\n");
-		debugpeintf("hmc5883l I2C connection [FAIL]\r\n");
+        debugpeintf("hmc5883l I2C connection [FAIL]\r\n");
     }
 
 #endif
-    if (SPL06Init(I2C0_DEV)) {
-        isBarometerPresent = true;
-        ESP_LOGI(TAG,"SPL06 I2C connection [OK].\n");
-		debugpeintf("SPL06 I2C connection [OK]\r\n");
-    } else {
+    
+    // 初始化气压传感器前再次延时
+    ESP_LOGI(TAG, "Initializing SPL06 barometer...");
+    vTaskDelay(100 / portTICK_PERIOD_MS);
+    
+    // SPL06初始化，带重试机制
+    bool spl06_connected = false;
+    for (int retry = 0; retry < 3 && !spl06_connected; retry++) {
+        if (retry > 0) {
+            ESP_LOGW(TAG, "SPL06 connection retry %d/3", retry);
+            vTaskDelay(100 / portTICK_PERIOD_MS);
+        }
+        
+        if (SPL06Init(I2C0_DEV)) {
+            spl06_connected = true;
+            isBarometerPresent = true;
+            ESP_LOGI(TAG,"SPL06 I2C connection [OK].\n");
+            debugpeintf("SPL06 I2C connection [OK]\r\n");
+        }
+    }
+    
+    if (!spl06_connected) {
         //TODO: Should sensor test fail hard if no connection
-       ESP_LOGE(TAG,"SPL06 I2C connection [FAIL].\n");
-	   debugpeintf("SPL06 I2C connection [FAIL]\r\n");
-	   goto lab1;
+        ESP_LOGE(TAG,"SPL06 I2C connection [FAIL].\n");
+        debugpeintf("SPL06 I2C connection [FAIL]\r\n");
+        goto lab1;
     }
 }
 
