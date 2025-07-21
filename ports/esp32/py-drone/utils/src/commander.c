@@ -403,6 +403,15 @@ bool getCommanderEmerStop(void)
 	return commander.emerStop;
 }
 
+bool isNoManualInput(void) {
+    const float stick_deadband = 5.0f;
+    const float thrust_deadband = 1000.0f;
+    return (fabsf(ctrlValLpf.roll) < stick_deadband &&
+            fabsf(ctrlValLpf.pitch) < stick_deadband &&
+            fabsf(ctrlValLpf.yaw) < stick_deadband &&
+            ctrlValLpf.thrust < thrust_deadband);
+}
+
 void print_commander(void)
 {
 	printf("ctrlMode:%d,keyFlight:%d,keyLand:%d,emerStop:%d,flightMode:%d\r\n",

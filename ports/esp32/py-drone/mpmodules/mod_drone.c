@@ -341,7 +341,8 @@ STATIC const mp_rom_map_elem_t drone_locals_dict_table[] = {
 	{ MP_ROM_QSTR(MP_QSTR_read_air_pressure), MP_ROM_PTR(&read_air_pressure_obj) },
 	{ MP_ROM_QSTR(MP_QSTR_read_calibrated), MP_ROM_PTR(&read_calibrated_obj) },
 	{ MP_ROM_QSTR(MP_QSTR_read_cal_data), MP_ROM_PTR(&read_cal_data_obj) },
-
+	{ MP_ROM_QSTR(MP_QSTR_hover_control), MP_ROM_PTR(&drone_hover_control_obj) },
+	{ MP_ROM_QSTR(MP_QSTR_is_hover_active), MP_ROM_PTR(&drone_is_hover_active_obj) },
 };
 STATIC MP_DEFINE_CONST_DICT(drone_drone_locals_dict,drone_locals_dict_table);
 
@@ -351,4 +352,34 @@ const mp_obj_type_t drone_drone_type = {
     .make_new = drone_make_new,
     .locals_dict = (mp_obj_dict_t *)&drone_drone_locals_dict,
 };
+
+// 新增：micropython接口，调用stabilizerHoverControl
+STATIC mp_obj_t drone_hover_control(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
+    static const mp_arg_t allowed_args[] = {
+        { MP_QSTR_x, MP_ARG_OBJ, {.u_obj = mp_const_none} },
+        { MP_QSTR_y, MP_ARG_OBJ, {.u_obj = mp_const_none} },
+        { MP_QSTR_height, MP_ARG_OBJ, {.u_obj = mp_const_none} },
+        { MP_QSTR_dt, MP_ARG_OBJ, {.u_obj = mp_obj_new_float(0.01f)} },
+    };
+    mp_arg_val_t args[MP_ARRAY_SIZE(allowed_args)];
+    mp_arg_parse_all(n_args - 1, pos_args + 1, kw_args, MP_ARRAY_SIZE(allowed_args), allowed_args, args);
+
+    float x, y, height;
+    Axis3f acc, vel, pos;
+    getStateData(&acc, &vel, &pos);
+    x = (args[0].u_obj == mp_const_none) ? pos.x : mp_obj_get_float(args[0].u_obj);
+    y = (args[1].u_obj == mp_const_none) ? pos.y : mp_obj_get_float(args[1].u_obj);
+    height = (args[2].u_obj == mp_const_none) ? pos.z : mp_obj_get_float(args[2].u_obj);
+    float dt = mp_obj_get_float(args[3].u_obj);
+
+    stabilizerHoverControl(x, y, height, dt);
+    return mp_const_none;
+}
+STATIC MP_DEFINE_CONST_FUN_OBJ_KW(drone_hover_control_obj, 1, drone_hover_control);
+
+// 新增：micropython接口，判断是否自动悬停
+STATIC mp_obj_t drone_is_hover_active(mp_obj_t self_in) {
+    return hoverControlIsActive() ? mp_const_true : mp_const_false;
+}
+STATIC MP_DEFINE_CONST_FUN_OBJ_1(drone_is_hover_active_obj, drone_is_hover_active);
 

@@ -11,6 +11,7 @@
 #include "flip.h"
 #include "optical_flow.h"
 #include "vl53lxx.h"
+#include "hover_control.h"
 #include "maths.h"
 #include "ledseq.h"
 #include "sensfusion6.h"
@@ -72,6 +73,7 @@ void stabilizerInit(void)
 {
 	if(isInit) return;
 	stateControlInit();		/*姿态PID初始化*/
+	hoverControlInit();		/* 悬停控制初始化 */
 	powerDistributionInit();		/*电机初始化*/
 	xTaskCreate(stabilizerTask, STABILIZER_TASK_NAME, STABILIZER_TASK_STACKSIZE, NULL, STABILIZER_TASK_PRI, &stabilizerHandle);	
 	isInit = true;
@@ -140,59 +142,81 @@ static void fastAdjustPosZ(void)
 	}	
 }
 
+// 新增：定点飞行控制方法
+void stabilizerHoverControl(float targetX, float targetY, float targetHeight, float dt)
+{
+    // 启用定点控制
+    hoverControlEnable(true);
+    hoverControlSetTarget(targetX, targetY, targetHeight);
+    // 调用定点控制更新
+    hoverControlUpdate(flowAvailable ? &flowData : NULL, tofAvailable ? &tofData : NULL, &setpoint, &state, dt);
+}
+
 void stabilizerTask(void* param)
 {
-	uint32_t tick = 0;
-	uint32_t lastWakeTime = xTaskGetTickCount();//getSysTickCnt();
-	
-	ledseqRun(SYS_LED, seq_alive);
+    uint32_t tick = 0;
+    uint32_t lastWakeTime = xTaskGetTickCount();//getSysTickCnt();
+    
+    ledseqRun(SYS_LED, seq_alive);
 
-	while(!sensorsAreCalibrated())
-	{
-		vTaskDelayUntil(&lastWakeTime, MAIN_LOOP_DT);
-	}
+    while(!sensorsAreCalibrated())
+    {
+        vTaskDelayUntil(&lastWakeTime, MAIN_LOOP_DT);
+    }
 
-	while(1) 
-	{
-		vTaskDelayUntil(&lastWakeTime, 1);
+    while(1) 
+    {
+        vTaskDelayUntil(&lastWakeTime, 1);
 
-		if (RATE_DO_EXECUTE(RATE_500_HZ, tick))
-		{
-			sensorsAcquire(&sensorData, tick);
-			readOptionalSensors(); // Read flow and TOF sensors
-		}
-		if (RATE_DO_EXECUTE(ATTITUDE_ESTIMAT_RATE, tick))
-		{
-			imuUpdate(sensorData.acc, sensorData.gyro, &state, ATTITUDE_ESTIMAT_DT);
-		}
-		if (RATE_DO_EXECUTE(POSITION_ESTIMAT_RATE, tick))
-		{
-			positionEstimate(&sensorData, &state, POSITION_ESTIMAT_DT);
-		}
-	
-		if (RATE_DO_EXECUTE(RATE_100_HZ, tick) && getIsCalibrated()==true)
-		{
-			commanderGetSetpoint(&setpoint, &state);
-		}
+        if (RATE_DO_EXECUTE(RATE_500_HZ, tick))
+        {
+            sensorsAcquire(&sensorData, tick);
+            readOptionalSensors(); // Read flow and TOF sensors
+        }
+        if (RATE_DO_EXECUTE(ATTITUDE_ESTIMAT_RATE, tick))
+        {
+            imuUpdate(sensorData.acc, sensorData.gyro, &state, ATTITUDE_ESTIMAT_DT);
+        }
+        if (RATE_DO_EXECUTE(POSITION_ESTIMAT_RATE, tick))
+        {
+            positionEstimate(&sensorData, &state, POSITION_ESTIMAT_DT);
+        }
+    
+        if (RATE_DO_EXECUTE(RATE_100_HZ, tick) && getIsCalibrated()==true)
+        {
+            commanderGetSetpoint(&setpoint, &state);
+        }
 
-		if (RATE_DO_EXECUTE(RATE_250_HZ, tick))
-		{
-			fastAdjustPosZ();
-		}		
+        if (RATE_DO_EXECUTE(RATE_250_HZ, tick))
+        {
+            fastAdjustPosZ();
+        }       
 
-		if (RATE_DO_EXECUTE(RATE_500_HZ, tick) && (getCommanderCtrlMode() != 0x03))
-		{
-			flyerFlipCheck(&setpoint, &control, &state);	
-		}
-		anomalDetec(&sensorData, &state, &control);			
-		stateControl(&control, &sensorData, &state, &setpoint, tick);
+        // 自动悬停逻辑：无人控制或无输入时自动悬停
+        if (RATE_DO_EXECUTE(RATE_100_HZ, tick))
+        {
+            if(getLockStatus() || isNoManualInput()) {
+                Axis3f acc, vel, pos;
+                getStateData(&acc, &vel, &pos);
+                stabilizerHoverControl(pos.x, pos.y, pos.z, 0.01f);
+            } else {
+                hoverControlEnable(false); // 有人操作时关闭自动悬停
+            }
+        }
 
-		if (RATE_DO_EXECUTE(RATE_500_HZ, tick))
-		{
-			powerDistribution(&control);
-		}
-		tick++;
-	}
+        if (RATE_DO_EXECUTE(RATE_500_HZ, tick) && (getCommanderCtrlMode() != 0x03))
+        {
+            flyerFlipCheck(&setpoint, &control, &state);   
+        }
+        anomalDetec(&sensorData, &state, &control);         
+        stateControl(&control, &sensorData, &state, &setpoint, tick);
+
+        if (RATE_DO_EXECUTE(RATE_500_HZ, tick))
+        {
+            powerDistribution(&control);
+        }
+        tick++;
+    }
 }
 
 void getAttitudeData(attitude_t* get)
