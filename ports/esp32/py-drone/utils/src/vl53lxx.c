@@ -29,17 +29,17 @@ static bool testSensorPresence(void)
 {
     uint8_t whoAmI = 0;
     
-    // Try VL53L0X first
-    if (i2cdevReadByte(I2C0_DEV, VL53LXX_I2C_ADDR, VL53L0X_WHO_AM_I, &whoAmI)) {
+    // Try VL53L0X first - 使用专用TOF I2C总线
+    if (i2cdevReadByte(I2C_TOF_DEV, VL53LXX_I2C_ADDR, VL53L0X_WHO_AM_I, &whoAmI)) {
         if (whoAmI == VL53L0X_EXPECTED_ID) {
             ESP_LOGI(TAG, "VL53L0X TOF sensor detected (ID: 0x%02X)", whoAmI);
             return true;
         }
     }
     
-    // Try VL53L1X (different register layout)
+    // Try VL53L1X (different register layout) - 使用专用TOF I2C总线
     uint16_t modelId = 0;
-    if (i2cdevReadReg16(I2C0_DEV, VL53LXX_I2C_ADDR, VL53L1X_WHO_AM_I, 1, (uint8_t*)&modelId)) {
+    if (i2cdevReadReg16(I2C_TOF_DEV, VL53LXX_I2C_ADDR, VL53L1X_WHO_AM_I, 1, (uint8_t*)&modelId)) {
         if ((modelId & 0xFF) == VL53L1X_EXPECTED_ID) {
             ESP_LOGI(TAG, "VL53L1X TOF sensor detected (ID: 0x%02X)", modelId & 0xFF);
             return true;

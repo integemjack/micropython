@@ -34,6 +34,7 @@
 typedef I2cDrv    I2C_Dev;
 #define I2C1_DEV  &deckBus
 #define I2C0_DEV  &sensorsBus
+#define I2C_TOF_DEV  &tofBus
 
 // For compatibility
 #define i2cdevWrite16 i2cdevWriteReg16

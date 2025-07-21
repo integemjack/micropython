@@ -47,3 +47,4 @@ genrst/
 # MacOS desktop metadata files
 ######################
 .DS_Store
+ESP32/

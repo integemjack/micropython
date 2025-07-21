@@ -17,6 +17,7 @@
 #include "motors.h"
 #include "optical_flow.h"
 #include "vl53lxx.h"
+#include "i2cdev.h"
 
 static const char* TAG = "system_int";
 
@@ -50,6 +51,9 @@ void systemInit(void)
 	pmInit();
 	//初始化传感器
 	sensorsMpu6050Spl06Init();
+	
+	// 初始化TOF传感器专用I2C总线
+	i2cdrvInit(&tofBus);
 	
 	// 尝试初始化光流传感器 (不影响主程序运行)
 	ESP_LOGI(TAG, "Checking for optical flow sensor...");
@@ -98,6 +102,9 @@ void systemDeInit(void)
 	motorsDeInit();
 	pmDeInit();
 	ledseqDeInit();
+	
+	// 清理TOF传感器I2C总线
+	i2cDrvDeInit(&tofBus);
 	//sensorsI2CdevDeInit();
 	
 	isInit = false;

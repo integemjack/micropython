@@ -78,6 +78,19 @@ I2cDrv deckBus = {
     .def                = &deckBusDef,
 };
 
+// TOF传感器I2C总线定义 - 使用独立的I2C总线(匹配根目录ESP32配置)
+static const I2cDef tofBusDef = {
+    .i2cPort            = I2C_NUM_1,  // 使用I2C_NUM_1的另一个实例
+    .i2cClockSpeed      = I2C_DEFAULT_SENSORS_CLOCK_SPEED,
+    .gpioSCLPin         = MICROPY_HW_TOF_I2C_PIN_SCL,   // GPIO 39
+    .gpioSDAPin         = MICROPY_HW_TOF_I2C_PIN_SDA,   // GPIO 38
+    .gpioPullup         = GPIO_PULLUP_DISABLE,
+};
+
+I2cDrv tofBus = {
+    .def                = &tofBusDef,
+};
+
 static void i2cdrvInitBus(I2cDrv *i2c)
 {
     if (isinit_i2cPort[i2c->def->i2cPort]) {

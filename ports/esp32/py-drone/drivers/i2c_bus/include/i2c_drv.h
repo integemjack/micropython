@@ -50,6 +50,7 @@ typedef struct {
 // Definitions of i2c busses found in c file.
 extern I2cDrv deckBus;
 extern I2cDrv sensorsBus;
+extern I2cDrv tofBus;
 
 /**
  * Initialize i2c peripheral as defined by static I2cDef structs.
