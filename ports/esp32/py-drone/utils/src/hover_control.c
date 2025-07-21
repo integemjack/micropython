@@ -10,6 +10,7 @@
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "config.h"  // 添加 config.h 引用，其中包含 DEG2RAD 定义
 
 static const char* TAG = "hover_control";
 
@@ -88,8 +89,8 @@ void hoverControlUpdate(flowMeasurement_t* flow, tofMeasurement_t* tof,
         float flowVelY = flow->dpixely / flow->dt * FLOW_SCALE_FACTOR;
         
         // Compensate for drone rotation
-        float cosYaw = cosf(state->attitude.yaw * DEG_TO_RAD);
-        float sinYaw = sinf(state->attitude.yaw * DEG_TO_RAD);
+        float cosYaw = cosf(state->attitude.yaw * DEG2RAD);
+        float sinYaw = sinf(state->attitude.yaw * DEG2RAD);
         
         float velX = flowVelX * cosYaw - flowVelY * sinYaw;
         float velY = flowVelX * sinYaw + flowVelY * cosYaw;

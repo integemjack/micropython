@@ -79,4 +79,7 @@ bool getRCLocked(void);
 float getLandingDis(void);
 bool getCommanderEmerStop(void);
 
+// 新增：补充 isNoManualInput 声明
+bool isNoManualInput(void);
+
 #endif /* __COMMANDER_H */
