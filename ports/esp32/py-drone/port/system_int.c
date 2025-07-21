@@ -15,10 +15,14 @@
 #include "stabilizer.h"
 #include "ledseq.h"
 #include "motors.h"
+#include "optical_flow.h"
+#include "vl53lxx.h"
 
 static const char* TAG = "system_int";
 
 static bool isInit = 0;
+static bool opticalFlowEnabled = false;
+static bool tofSensorEnabled = false;
 
 static bool systemTest(void)
 {
@@ -31,6 +35,7 @@ static bool systemTest(void)
 	
 	return pass;
 }
+
 //初始化系统
 void systemInit(void)
 {
@@ -45,14 +50,50 @@ void systemInit(void)
 	pmInit();
 	//初始化传感器
 	sensorsMpu6050Spl06Init();
+	
+	// 尝试初始化光流传感器 (不影响主程序运行)
+	ESP_LOGI(TAG, "Checking for optical flow sensor...");
+	opticalFlowEnabled = opticalFlowInit();
+	if (opticalFlowEnabled) {
+		ESP_LOGI(TAG, "✓ Optical flow sensor enabled and ready");
+	} else {
+		ESP_LOGI(TAG, "✗ Optical flow sensor not available - system will continue without it");
+	}
+	
+	// 尝试初始化TOF传感器 (不影响主程序运行)
+	ESP_LOGI(TAG, "Checking for TOF sensor...");
+	tofSensorEnabled = tofSensorInit();
+	if (tofSensorEnabled) {
+		ESP_LOGI(TAG, "✓ TOF sensor enabled and ready");
+	} else {
+		ESP_LOGI(TAG, "✗ TOF sensor not available - system will continue without it");
+	}
+	
+	// 显示传感器状态总结
+	ESP_LOGI(TAG, "Sensor summary: Flow=%s, TOF=%s", 
+		opticalFlowEnabled ? "ON" : "OFF",
+		tofSensorEnabled ? "ON" : "OFF");
+	
 	//初始化姿态处理
 	stabilizerInit();
 	systemTest();
 }
+
 void systemDeInit(void)
 {
 	stabilizerDeInit();
 
+	// 清理传感器 (安全清理，即使传感器未初始化也不会出错)
+	if (opticalFlowEnabled) {
+		opticalFlowDeInit();
+		opticalFlowEnabled = false;
+	}
+	
+	if (tofSensorEnabled) {
+		tofSensorDeInit();
+		tofSensorEnabled = false;
+	}
+	
 	sensorsMpu6050Spl06DeInit();
 	motorsDeInit();
 	pmDeInit();
@@ -62,4 +103,14 @@ void systemDeInit(void)
 	isInit = false;
 }
 
+// 获取传感器状态的函数 (可供其他模块查询)
+bool getOpticalFlowStatus(void)
+{
+	return opticalFlowEnabled;
+}
+
+bool getTofSensorStatus(void)
+{
+	return tofSensorEnabled;
+}
 

@@ -9,8 +9,8 @@
 #include "power_distribution.h"
 #include "position_pid.h"
 #include "flip.h"
-// #include "optical_flow.h"
-// #include "vl53lxx.h"
+#include "optical_flow.h"
+#include "vl53lxx.h"
 #include "maths.h"
 #include "ledseq.h"
 #include "sensfusion6.h"
@@ -19,6 +19,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
+#include <string.h>
 
 static bool isInit = false;
 
@@ -32,6 +33,36 @@ static uint16_t absModeTimes = 0;		/*绝对值模式次数*/
 static float setHeight = 0.f;		/*设定目标高度 单位cm*/
 static float baroLast = 0.f;
 static float baroVelLpf = 0.f;
+
+static flowMeasurement_t flowData;
+static tofMeasurement_t tofData;
+static bool flowAvailable = false;
+static bool tofAvailable = false;
+
+void readOptionalSensors(void)
+{
+    // 重置可用性标志
+    flowAvailable = false;
+    tofAvailable = false;
+    
+    // 安全读取光流传感器数据
+    if (opticalFlowIsPresent()) {
+        flowAvailable = opticalFlowReadMeasurement(&flowData);
+        if (!flowAvailable) {
+            // 如果读取失败，清零数据
+            memset(&flowData, 0, sizeof(flowData));
+        }
+    }
+    
+    // 安全读取TOF传感器数据
+    if (tofSensorIsPresent()) {
+        tofAvailable = tofSensorReadMeasurement(&tofData);
+        if (!tofAvailable) {
+            // 如果读取失败，清零数据
+            memset(&tofData, 0, sizeof(tofData));
+        }
+    }
+}
 
 TaskHandle_t stabilizerHandle = NULL;
 
@@ -128,6 +159,7 @@ void stabilizerTask(void* param)
 		if (RATE_DO_EXECUTE(RATE_500_HZ, tick))
 		{
 			sensorsAcquire(&sensorData, tick);
+			readOptionalSensors(); // Read flow and TOF sensors
 		}
 		if (RATE_DO_EXECUTE(ATTITUDE_ESTIMAT_RATE, tick))
 		{

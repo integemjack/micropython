@@ -28,7 +28,11 @@
 
 #include "stabilizer_types.h"
 
-void positionEstimate(state_t* estimate, const sensorData_t* sensorData, const tofMeasurement_t* tofMeasurement, float dt, uint32_t tick);
+// Original function signature (matches implementation in state_estimator.c)
+void positionEstimate(sensorData_t* sensorData, state_t* state, float dt);
 void positionUpdateVelocity(float accWZ, float dt);
+
+// Enhanced function signature for future TOF integration
+// void positionEstimateWithTOF(state_t* estimate, const sensorData_t* sensorData, const tofMeasurement_t* tofMeasurement, float dt, uint32_t tick);
 
 #endif /* POSITION_ESTIMATOR_H_ */
