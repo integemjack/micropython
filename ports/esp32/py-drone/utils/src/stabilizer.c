@@ -156,6 +156,7 @@ void stabilizerTask(void* param)
 {
     uint32_t tick = 0;
     uint32_t lastWakeTime = xTaskGetTickCount();//getSysTickCnt();
+    bool lastHoverState = false;      // 记录上次悬停状态
     
     ledseqRun(SYS_LED, seq_alive);
 
@@ -195,13 +196,27 @@ void stabilizerTask(void* param)
         // 自动悬停逻辑：无人控制或无输入时自动悬停
         if (RATE_DO_EXECUTE(RATE_100_HZ, tick))
         {
-            if(getLockStatus() || isNoManualInput()) {
+            bool currentHoverState = getLockStatus() || isNoManualInput();
+            
+            if(currentHoverState) {
                 Axis3f acc, vel, pos;
                 getStateData(&acc, &vel, &pos);
+                
+                // 状态变化时打印一次
+                if (!lastHoverState) {
+                    debugpeintf("Auto hover activated: pos(%.2f, %.2f, %.2f)\n", pos.x, pos.y, pos.z);
+                }
+                
                 stabilizerHoverControl(pos.x, pos.y, pos.z, 0.01f);
             } else {
+                // 状态变化时打印一次
+                if (lastHoverState) {
+                    debugpeintf("Auto hover deactivated: manual control\n");
+                }
                 hoverControlEnable(false); // 有人操作时关闭自动悬停
             }
+            
+            lastHoverState = currentHoverState;
         }
 
         if (RATE_DO_EXECUTE(RATE_500_HZ, tick) && (getCommanderCtrlMode() != 0x03))
