@@ -48,3 +48,4 @@ genrst/
 ######################
 .DS_Store
 ESP32/
+.vscode/

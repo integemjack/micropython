@@ -204,7 +204,9 @@ void stabilizerTask(void* param)
                 
                 // 状态变化时打印一次
                 if (!lastHoverState) {
-                    debugpeintf("Auto hover activated: pos(%.2f, %.2f, %.2f)\n", pos.x, pos.y, pos.z);
+                    char debug_str[64];
+                    snprintf(debug_str, sizeof(debug_str), "Auto hover activated: pos(%.2f, %.2f, %.2f)\n", pos.x, pos.y, pos.z);
+                    debugpeintf(debug_str);
                 }
                 
                 stabilizerHoverControl(pos.x, pos.y, pos.z, 0.01f);
