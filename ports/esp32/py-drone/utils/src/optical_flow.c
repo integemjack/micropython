@@ -7,17 +7,19 @@
 #include "driver/spi_master.h"
 #include "driver/gpio.h" 
 #include "esp_log.h"
+#include "esp_rom_sys.h"  // for esp_rom_delay_us
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "sensors_mpu6050_spl06.h"
 
 static const char* TAG = "optical_flow";
 
-// PMW3901 optical flow sensor SPI configuration (from pmw3901.py)
-#define PMW3901_WHO_AM_I        0x00
-#define PMW3901_EXPECTED_ID     0x49
-#define PMW3901_CHIP_ID_INVERSE 0x5F
-#define PMW3901_EXPECTED_ID_INV 0xB6
+// 光流传感器SPI配置 (支持多种型号)
+#define OPTICAL_FLOW_WHO_AM_I        0x00
+#define PMW3901_EXPECTED_ID          0x49  // PMW3901
+#define PAA5100_EXPECTED_ID          0x07  // PAA5100 或兼容传感器
+#define PMW3901_CHIP_ID_INVERSE      0x5F
+#define PMW3901_EXPECTED_ID_INV      0xB6
 
 // PMW3901 数据寄存器 (from pmw3901.py)
 #define PMW3901_MOTION_LATCH    0x02  // 运动寄存器锁存器
@@ -36,7 +38,7 @@ static const char* TAG = "optical_flow";
 #define PMW3901_SPI_MISO    17   // GPIO 17
 #define PMW3901_SPI_CS      8    // GPIO 8
 
-#define PMW3901_SPI_FREQ    2000000  // 2MHz SPI频率
+#define PMW3901_SPI_FREQ    500000   // 降低到500KHz SPI频率，提高稳定性
 
 // Check if this sensor is supported
 #if OPTICAL_FLOW_SENSOR_ENABLED
@@ -45,35 +47,81 @@ static bool isInit = false;
 static bool isPresent = false;
 static spi_device_handle_t pmw3901_spi;
 
-// SPI读取函数
+// SPI读取函数 (完全按照pmw3901.py的手动CS控制实现)
 static bool pmw3901_spi_read_reg(uint8_t reg, uint8_t* data)
 {
-    spi_transaction_t trans = {0};
-    uint8_t tx_data[2] = {reg & 0x7F, 0x00};  // 读取命令 (清除MSB)
-    uint8_t rx_data[2] = {0};
+    esp_err_t ret;
+    uint8_t tx_addr = reg & 0x7F;  // 清除写标志
+    uint8_t rx_data = 0;
     
-    trans.length = 16;  // 16位 (2字节)
-    trans.tx_buffer = tx_data;
-    trans.rx_buffer = rx_data;
+    // 手动控制CS - 拉低开始通信 (对应Python: self.cs.value(0))
+    gpio_set_level(PMW3901_SPI_CS, 0);
+    esp_rom_delay_us(50);  // 对应Python: utime.sleep_us(50)
     
-    esp_err_t ret = spi_device_transmit(pmw3901_spi, &trans);
+    // 发送寄存器地址 (对应Python: self.spi.write(bytearray([reg])))
+    spi_transaction_t trans1 = {0};
+    trans1.length = 8;
+    trans1.tx_buffer = &tx_addr;
+    
+    ret = spi_device_transmit(pmw3901_spi, &trans1);
+    if (ret != ESP_OK) {
+        gpio_set_level(PMW3901_SPI_CS, 1);  // 出错时释放CS
+        return false;
+    }
+    
+    esp_rom_delay_us(50);  // 对应Python: utime.sleep_us(50)
+    
+    // 读取数据 (对应Python: result = self.spi.read(1))
+    spi_transaction_t trans2 = {0};
+    trans2.length = 8;
+    trans2.rx_buffer = &rx_data;
+    
+    ret = spi_device_transmit(pmw3901_spi, &trans2);
+    
+    esp_rom_delay_us(100); // 对应Python: utime.sleep_us(100)
+    
+    // 手动释放CS (对应Python: self.cs.value(1))
+    gpio_set_level(PMW3901_SPI_CS, 1);
+    
     if (ret == ESP_OK) {
-        *data = rx_data[1];  // 第二个字节是数据
+        *data = rx_data;
+        
+        // 添加详细的SPI调试信息
+        static uint32_t spi_debug_counter = 0;
+        if (++spi_debug_counter % 1000 == 0) { // 每4秒打印一次
+            char debug_str[80];
+            snprintf(debug_str, sizeof(debug_str), "SPI Read: reg=0x%02X -> data=0x%02X\n", reg, rx_data);
+            debugpeintf(debug_str);
+        }
+        
         return true;
     }
     return false;
 }
 
-// SPI写入函数 (根据pmw3901.py)
+// SPI写入函数 (完全按照pmw3901.py的手动CS控制实现)
 static bool pmw3901_spi_write_reg(uint8_t reg, uint8_t data)
 {
-    spi_transaction_t trans = {0};
     uint8_t tx_data[2] = {reg | 0x80, data};  // 写入命令 (设置MSB)
     
+    // 手动控制CS - 拉低开始通信 (对应Python: self.cs.value(0))
+    gpio_set_level(PMW3901_SPI_CS, 0);
+    esp_rom_delay_us(50);  // 对应Python: utime.sleep_us(50)
+    
+    // 同时发送地址和数据 (对应Python: self.spi.write(bytearray([reg, value])))
+    spi_transaction_t trans = {0};
     trans.length = 16;  // 16位 (2字节)
     trans.tx_buffer = tx_data;
     
     esp_err_t ret = spi_device_transmit(pmw3901_spi, &trans);
+    
+    esp_rom_delay_us(50);  // 对应Python: utime.sleep_us(50)
+    
+    // 手动释放CS (对应Python: self.cs.value(1))
+    gpio_set_level(PMW3901_SPI_CS, 1);
+    
+    esp_rom_delay_us(200); // 对应Python: utime.sleep_us(200)
+    
     return (ret == ESP_OK);
 }
 
@@ -156,9 +204,11 @@ static bool pmw3901_spi_init(void)
     
     spi_device_interface_config_t dev_cfg = {
         .clock_speed_hz = PMW3901_SPI_FREQ,
-        .mode = 3,  // PMW3901使用SPI模式3
-        .spics_io_num = PMW3901_SPI_CS,
+        .mode = 3,  // PMW3901使用SPI模式3 (CPOL=1, CPHA=1)
+        .spics_io_num = -1,     // 禁用自动CS控制，改用手动控制
         .queue_size = 1,
+        .flags = 0,
+        .duty_cycle_pos = 128,  // 50% duty cycle
     };
     
     // 初始化SPI总线
@@ -182,52 +232,136 @@ static bool pmw3901_spi_init(void)
 static bool testSensorPresence(void)
 {
     uint8_t whoAmI = 0;
+    char debug_str[128];  // 统一的调试字符串缓冲区
     
     // 首先初始化SPI
     if (!pmw3901_spi_init()) {
         ESP_LOGE(TAG, "Failed to initialize SPI for PMW3901");
+        snprintf(debug_str, sizeof(debug_str), "Failed to initialize SPI for PMW3901\n");
+        debugpeintf(debug_str);
         return false;
     }
     
-    // 等待传感器启动
-    vTaskDelay(50 / portTICK_PERIOD_MS);
+    // 等待传感器启动 - 增加更长的启动延时
+    ESP_LOGI(TAG, "Waiting for PMW3901 startup (100ms)...");
+    snprintf(debug_str, sizeof(debug_str), "Waiting for PMW3901 startup (100ms)...");
+    debugpeintf(debug_str);
+    vTaskDelay(pdMS_TO_TICKS(100));
+    
+    // 尝试多种不同的SPI模式来排查
+    ESP_LOGI(TAG, "Testing different SPI modes...");
+    for (int mode = 0; mode <= 3; mode++) {
+        ESP_LOGI(TAG, "Testing SPI mode %d", mode);
+        snprintf(debug_str, sizeof(debug_str), "Testing SPI mode %d\n", mode);
+        debugpeintf(debug_str);
+        
+        // 重新配置SPI模式
+        spi_bus_remove_device(pmw3901_spi);
+        spi_device_interface_config_t test_cfg = {
+            .clock_speed_hz = 100000,  // 超低频率测试
+            .mode = mode,
+            .spics_io_num = -1,
+            .queue_size = 1,
+        };
+        spi_bus_add_device(SPI2_HOST, &test_cfg, &pmw3901_spi);
+        
+        uint8_t test_val;
+        if (pmw3901_spi_read_reg(OPTICAL_FLOW_WHO_AM_I, &test_val)) {
+            ESP_LOGI(TAG, "Mode %d result: 0x%02X", mode, test_val);
+            snprintf(debug_str, sizeof(debug_str), "Mode %d result: 0x%02X\n", mode, test_val);
+            debugpeintf(debug_str);
+            if (test_val == PMW3901_EXPECTED_ID) {
+                ESP_LOGI(TAG, "Found correct chip ID with mode %d!", mode);
+                snprintf(debug_str, sizeof(debug_str), "Found correct chip ID with mode %d!\n", mode);
+                debugpeintf(debug_str);
+                break;
+            }
+        }
+    }
+    
+    // 恢复到模式3和原始频率
+    spi_bus_remove_device(pmw3901_spi);
+    spi_device_interface_config_t restore_cfg = {
+        .clock_speed_hz = PMW3901_SPI_FREQ,
+        .mode = 3,
+        .spics_io_num = -1,
+        .queue_size = 1,
+    };
+    spi_bus_add_device(SPI2_HOST, &restore_cfg, &pmw3901_spi);
     
     // 执行电源复位 (根据pmw3901.py)
+    ESP_LOGI(TAG, "Sending power-on reset...");
     pmw3901_spi_write_reg(PMW3901_POWER_RESET, 0x5A);
-    vTaskDelay(pdMS_TO_TICKS(5)); // 等待5ms
+    vTaskDelay(pdMS_TO_TICKS(50)); // 增加复位后延时到50ms
     
-    // Try to read WHO_AM_I register from PMW3901 via SPI
+    // 尝试读取WHO_AM_I寄存器来验证传感器存在
+    ESP_LOGI(TAG, "Reading WHO_AM_I register (0x%02X)...", OPTICAL_FLOW_WHO_AM_I);
+    snprintf(debug_str, sizeof(debug_str), "Reading WHO_AM_I register (0x%02X)...\n", OPTICAL_FLOW_WHO_AM_I);
+    debugpeintf(debug_str);
+    
     uint8_t chipIdInverse;
-    if (pmw3901_spi_read_reg(PMW3901_WHO_AM_I, &whoAmI) &&
-        pmw3901_spi_read_reg(PMW3901_CHIP_ID_INVERSE, &chipIdInverse)) {
+    bool read1_success = pmw3901_spi_read_reg(OPTICAL_FLOW_WHO_AM_I, &whoAmI);
+    bool read2_success = pmw3901_spi_read_reg(PMW3901_CHIP_ID_INVERSE, &chipIdInverse);
+    
+    snprintf(debug_str, sizeof(debug_str), "Read results: WHO_AM_I=%s (0x%02X), ID_INV=%s (0x%02X)\n", 
+             read1_success ? "SUCCESS" : "FAILED", whoAmI,
+             read2_success ? "SUCCESS" : "FAILED", chipIdInverse);
+    debugpeintf(debug_str);
+    
+    if (read1_success && read2_success) {
+        snprintf(debug_str, sizeof(debug_str), "Chip verify: WHO_AM_I=0x%02X (exp 0x%02X), ID_INV=0x%02X (exp 0x%02X)\n",
+                 whoAmI, PMW3901_EXPECTED_ID, chipIdInverse, PMW3901_EXPECTED_ID_INV);
+        debugpeintf(debug_str);
         
         if (whoAmI == PMW3901_EXPECTED_ID && chipIdInverse == PMW3901_EXPECTED_ID_INV) {
-            ESP_LOGI(TAG, "PMW3901 optical flow sensor detected via SPI (ID: 0x%02X, INV: 0x%02X)", 
-                     whoAmI, chipIdInverse);
+            snprintf(debug_str, sizeof(debug_str), "✓ PMW3901 optical flow sensor verified successfully!\n");
+            debugpeintf(debug_str);
             
-            // 清除运动寄存器 (根据pmw3901.py)
-            uint8_t dummy;
-            pmw3901_spi_read_reg(PMW3901_MOTION_LATCH, &dummy);
-            pmw3901_spi_read_reg(PMW3901_DELTA_X_L, &dummy);
-            pmw3901_spi_read_reg(PMW3901_DELTA_X_H, &dummy);
-            pmw3901_spi_read_reg(PMW3901_DELTA_Y_L, &dummy);
-            pmw3901_spi_read_reg(PMW3901_DELTA_Y_H, &dummy);
-            vTaskDelay(pdMS_TO_TICKS(1)); // 等待1ms
-            
-            // 执行完整的传感器初始化序列 (从pmw3901.py)
+        // 清除运动寄存器 (兼容所有光流传感器)
+        snprintf(debug_str, sizeof(debug_str), "Clearing motion registers...\n");
+        debugpeintf(debug_str);
+        uint8_t dummy;
+        pmw3901_spi_read_reg(PMW3901_MOTION_LATCH, &dummy);
+        pmw3901_spi_read_reg(PMW3901_DELTA_X_L, &dummy);
+        pmw3901_spi_read_reg(PMW3901_DELTA_X_H, &dummy);
+        pmw3901_spi_read_reg(PMW3901_DELTA_Y_L, &dummy);
+        pmw3901_spi_read_reg(PMW3901_DELTA_Y_H, &dummy);
+        vTaskDelay(pdMS_TO_TICKS(1)); // 等待1ms
+        
+        // 根据传感器类型选择初始化
+        if (whoAmI == PMW3901_EXPECTED_ID) {
+            ESP_LOGI(TAG, "Executing PMW3901 initialization sequence...");
             pmw3901_init_registers();
-            ESP_LOGI(TAG, "PMW3901 initialization complete");
-            
-            return true;
         } else {
-            ESP_LOGW(TAG, "Wrong chip ID from PMW3901: expected 0x%02X/0x%02X, got 0x%02X/0x%02X", 
-                     PMW3901_EXPECTED_ID, PMW3901_EXPECTED_ID_INV, whoAmI, chipIdInverse);
+            ESP_LOGI(TAG, "Skipping complex initialization for non-PMW3901 sensor");
+        }
+        
+        snprintf(debug_str, sizeof(debug_str), "✓ Optical flow sensor initialization completed successfully\n");
+        debugpeintf(debug_str);
+        ESP_LOGI(TAG, "✓ Optical flow sensor initialization completed successfully");
+        
+        return true;
+    } else {
+            // 这个分支现在不应该被执行，因为上面已经处理了所有情况
+            snprintf(debug_str, sizeof(debug_str), "✗ Unexpected sensor state\n");
+            debugpeintf(debug_str);
             return false;
         }
     }
     
-    // If SPI communication fails, sensor is not present
-    ESP_LOGW(TAG, "No response from PMW3901 optical flow sensor via SPI");
+    // SPI通信失败
+    snprintf(debug_str, sizeof(debug_str), "✗ SPI communication failure - cannot read PMW3901 registers\n");
+    debugpeintf(debug_str);
+    snprintf(debug_str, sizeof(debug_str), "  This could indicate:\n");
+    debugpeintf(debug_str);
+    snprintf(debug_str, sizeof(debug_str), "  1. Hardware connection issues (SPI wiring)\n");
+    debugpeintf(debug_str);
+    snprintf(debug_str, sizeof(debug_str), "  2. Power supply problems\n");
+    debugpeintf(debug_str);
+    snprintf(debug_str, sizeof(debug_str), "  3. SPI configuration mismatch\n");
+    debugpeintf(debug_str);
+    snprintf(debug_str, sizeof(debug_str), "  4. GPIO pin conflicts with other peripherals\n");
+    debugpeintf(debug_str);
     return false;
 }
 
