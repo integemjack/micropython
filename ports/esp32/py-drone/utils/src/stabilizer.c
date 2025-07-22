@@ -248,27 +248,27 @@ void stabilizerTask(void* param)
         }
 
         // 每秒打印一次悬停状态调试信息
-        // if (RATE_DO_EXECUTE(RATE_1_HZ, tick))
-        // {
-        //     bool currentHoverState = getLockStatus() || isNoManualInput();
+        if (RATE_DO_EXECUTE(RATE_1_HZ, tick))
+        {
+            bool currentHoverState = getLockStatus() || isNoManualInput();
             
-        //     // 添加光流传感器调试信息
-        //     char debug_str[80];
-        //     snprintf(debug_str, sizeof(debug_str), "Flow: avail=%d, dx=%.1f, dy=%.1f, dt=%.3f\n", 
-        //             flowAvailable, flowData.dpixelx, flowData.dpixely, flowData.dt);
-        //     debugpeintf(debug_str);
+            // 添加光流传感器调试信息
+            char debug_str[80];
+            snprintf(debug_str, sizeof(debug_str), "Flow: avail=%d, dx=%.1f, dy=%.1f, dt=%.3f\n", 
+                    flowAvailable, flowData.dpixelx, flowData.dpixely, flowData.dt);
+            debugpeintf(debug_str);
             
-        //     if(currentHoverState) {
-        //         Axis3f acc, vel, pos;
-        //         getStateData(&acc, &vel, &pos);
+            if(currentHoverState) {
+                Axis3f acc, vel, pos;
+                getStateData(&acc, &vel, &pos);
                 
-        //         snprintf(debug_str, sizeof(debug_str), "Auto hover: pos(%.2f, %.2f, %.2f), vel(%.2f, %.2f)\n", 
-        //                 pos.x, pos.y, pos.z, vel.x, vel.y);
-        //         debugpeintf(debug_str);
-        //     } else {
-        //         debugpeintf("Auto hover deactivated: manual control\n");
-        //     }
-        // }
+                snprintf(debug_str, sizeof(debug_str), "Auto hover: pos(%.2f, %.2f, %.2f), vel(%.2f, %.2f)\n", 
+                        pos.x, pos.y, pos.z, vel.x, vel.y);
+                debugpeintf(debug_str);
+            } else {
+                debugpeintf("Auto hover deactivated: manual control\n");
+            }
+        }
 
         if (RATE_DO_EXECUTE(RATE_500_HZ, tick) && (getCommanderCtrlMode() != 0x03))
         {
