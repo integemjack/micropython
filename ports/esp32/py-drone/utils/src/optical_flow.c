@@ -193,6 +193,24 @@ static void pmw3901_init_registers(void)
 // SPI初始化函数
 static bool pmw3901_spi_init(void)
 {
+    // 首先配置CS引脚作为输出GPIO
+    gpio_config_t cs_cfg = {
+        .pin_bit_mask = (1ULL << PMW3901_SPI_CS),
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_ENABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    
+    esp_err_t ret = gpio_config(&cs_cfg);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to configure CS GPIO: %s", esp_err_to_name(ret));
+        return false;
+    }
+    
+    // 设置CS为高电平（空闲状态）
+    gpio_set_level(PMW3901_SPI_CS, 1);
+    
     spi_bus_config_t bus_cfg = {
         .miso_io_num = PMW3901_SPI_MISO,
         .mosi_io_num = PMW3901_SPI_MOSI,
@@ -212,7 +230,7 @@ static bool pmw3901_spi_init(void)
     };
     
     // 初始化SPI总线
-    esp_err_t ret = spi_bus_initialize(SPI2_HOST, &bus_cfg, SPI_DMA_CH_AUTO);
+    ret = spi_bus_initialize(SPI2_HOST, &bus_cfg, SPI_DMA_CH_AUTO);
     if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {  // ESP_ERR_INVALID_STATE表示总线已初始化
         ESP_LOGE(TAG, "Failed to initialize SPI bus: %s", esp_err_to_name(ret));
         return false;
@@ -270,7 +288,7 @@ static bool testSensorPresence(void)
             ESP_LOGI(TAG, "Mode %d result: 0x%02X", mode, test_val);
             snprintf(debug_str, sizeof(debug_str), "Mode %d result: 0x%02X\n", mode, test_val);
             debugpeintf(debug_str);
-            if (test_val == PMW3901_EXPECTED_ID) {
+            if (test_val == PMW3901_EXPECTED_ID || test_val == PAA5100_EXPECTED_ID) {
                 ESP_LOGI(TAG, "Found correct chip ID with mode %d!", mode);
                 snprintf(debug_str, sizeof(debug_str), "Found correct chip ID with mode %d!\n", mode);
                 debugpeintf(debug_str);
@@ -292,7 +310,11 @@ static bool testSensorPresence(void)
     // 执行电源复位 (根据pmw3901.py)
     ESP_LOGI(TAG, "Sending power-on reset...");
     pmw3901_spi_write_reg(PMW3901_POWER_RESET, 0x5A);
-    vTaskDelay(pdMS_TO_TICKS(50)); // 增加复位后延时到50ms
+    vTaskDelay(pdMS_TO_TICKS(100)); // 增加复位后延时到100ms
+    
+    // 清除寄存器页面选择，确保在页面0
+    pmw3901_spi_write_reg(PMW3901_PAGE_SELECT, 0x00);
+    vTaskDelay(pdMS_TO_TICKS(10));
     
     // 尝试读取WHO_AM_I寄存器来验证传感器存在
     ESP_LOGI(TAG, "Reading WHO_AM_I register (0x%02X)...", OPTICAL_FLOW_WHO_AM_I);
@@ -308,16 +330,44 @@ static bool testSensorPresence(void)
              read2_success ? "SUCCESS" : "FAILED", chipIdInverse);
     debugpeintf(debug_str);
     
-    if (read1_success && read2_success) {
-        snprintf(debug_str, sizeof(debug_str), "Chip verify: WHO_AM_I=0x%02X (exp 0x%02X), ID_INV=0x%02X (exp 0x%02X)\n",
-                 whoAmI, PMW3901_EXPECTED_ID, chipIdInverse, PMW3901_EXPECTED_ID_INV);
-        debugpeintf(debug_str);
-        
-        if (whoAmI == PMW3901_EXPECTED_ID && chipIdInverse == PMW3901_EXPECTED_ID_INV) {
-            snprintf(debug_str, sizeof(debug_str), "✓ PMW3901 optical flow sensor verified successfully!\n");
+    if (read1_success) {
+        // 检查是否为PMW3901
+        if (whoAmI == PMW3901_EXPECTED_ID && read2_success && chipIdInverse == PMW3901_EXPECTED_ID_INV) {
+            snprintf(debug_str, sizeof(debug_str), "✓ PMW3901 verified: WHO_AM_I=0x%02X, ID_INV=0x%02X\n", whoAmI, chipIdInverse);
+            debugpeintf(debug_str);
+            ESP_LOGI(TAG, "Executing PMW3901 initialization sequence...");
+            pmw3901_init_registers();
+        } 
+        // 检查是否为PAA5100或兼容型号
+        else if (whoAmI == PAA5100_EXPECTED_ID) {
+            snprintf(debug_str, sizeof(debug_str), "✓ PAA5100/compatible sensor verified: WHO_AM_I=0x%02X\n", whoAmI);
+            debugpeintf(debug_str);
+            ESP_LOGI(TAG, "PAA5100/compatible sensor detected, skipping PMW3901-specific init.");
+        }
+        // 如果两个都不是，则识别失败
+        else {
+            snprintf(debug_str, sizeof(debug_str), "✗ Chip ID mismatch - Not a valid PMW3901/PAA5100 sensor\n");
+            debugpeintf(debug_str);
+            snprintf(debug_str, sizeof(debug_str), "  Expected: WHO_AM_I=0x%02X (PMW) or 0x%02X (PAA)\n", PMW3901_EXPECTED_ID, PAA5100_EXPECTED_ID);
+            debugpeintf(debug_str);
+            snprintf(debug_str, sizeof(debug_str), "  Got:      WHO_AM_I=0x%02X, ID_INV=0x%02X\n", whoAmI, chipIdInverse);
             debugpeintf(debug_str);
             
-        // 清除运动寄存器 (兼容所有光流传感器)
+            // 检查是否是常见的错误情况
+            if (whoAmI == 0xFF || whoAmI == 0x00) {
+                snprintf(debug_str, sizeof(debug_str), "  Note: 0x%02X suggests SPI line stuck or no pullup\n", whoAmI);
+                debugpeintf(debug_str);
+            } else if (whoAmI == 0x7F) {
+                snprintf(debug_str, sizeof(debug_str), "  Note: 0x7F may indicate timing issues or wrong SPI mode\n");
+                debugpeintf(debug_str);
+            }
+            
+            snprintf(debug_str, sizeof(debug_str), "✗ Optical flow sensor not available - system will continue without it\n");
+            debugpeintf(debug_str);
+            return false;
+        }
+
+        // 通用的初始化流程
         snprintf(debug_str, sizeof(debug_str), "Clearing motion registers...\n");
         debugpeintf(debug_str);
         uint8_t dummy;
@@ -326,27 +376,13 @@ static bool testSensorPresence(void)
         pmw3901_spi_read_reg(PMW3901_DELTA_X_H, &dummy);
         pmw3901_spi_read_reg(PMW3901_DELTA_Y_L, &dummy);
         pmw3901_spi_read_reg(PMW3901_DELTA_Y_H, &dummy);
-        vTaskDelay(pdMS_TO_TICKS(1)); // 等待1ms
-        
-        // 根据传感器类型选择初始化
-        if (whoAmI == PMW3901_EXPECTED_ID) {
-            ESP_LOGI(TAG, "Executing PMW3901 initialization sequence...");
-            pmw3901_init_registers();
-        } else {
-            ESP_LOGI(TAG, "Skipping complex initialization for non-PMW3901 sensor");
-        }
-        
+        vTaskDelay(pdMS_TO_TICKS(1));
+
         snprintf(debug_str, sizeof(debug_str), "✓ Optical flow sensor initialization completed successfully\n");
         debugpeintf(debug_str);
         ESP_LOGI(TAG, "✓ Optical flow sensor initialization completed successfully");
         
         return true;
-    } else {
-            // 这个分支现在不应该被执行，因为上面已经处理了所有情况
-            snprintf(debug_str, sizeof(debug_str), "✗ Unexpected sensor state\n");
-            debugpeintf(debug_str);
-            return false;
-        }
     }
     
     // SPI通信失败
