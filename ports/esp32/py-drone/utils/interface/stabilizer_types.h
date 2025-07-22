@@ -295,7 +295,8 @@ typedef struct {
 
 // Frequencies to bo used with the RATE_DO_EXECUTE_HZ macro. Do NOT use an arbitrary number.
 
-#define RATE_5_HZ		5
+#define RATE_1_HZ		  1
+#define RATE_5_HZ		  5
 #define RATE_10_HZ		10
 #define RATE_25_HZ		25
 #define RATE_50_HZ		50

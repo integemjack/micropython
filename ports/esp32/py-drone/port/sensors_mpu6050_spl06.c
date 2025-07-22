@@ -114,7 +114,7 @@ static bool isInit = false;
 
 static bool isBarometerPresent = false;
 static bool isMagnetometerPresent = false;
-static uint8_t isprintf = 0;
+static uint8_t isprintf = 1;
 typedef struct {
     Axis3f bias;
     Axis3f variance;//
