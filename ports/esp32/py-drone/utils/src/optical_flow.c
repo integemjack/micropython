@@ -9,12 +9,26 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "sensors_mpu6050_spl06.h"
 
 static const char* TAG = "optical_flow";
 
-// PMW3901 optical flow sensor SPI configuration
-#define PMW3901_WHO_AM_I    0x00
-#define PMW3901_EXPECTED_ID 0x49
+// PMW3901 optical flow sensor SPI configuration (from pmw3901.py)
+#define PMW3901_WHO_AM_I        0x00
+#define PMW3901_EXPECTED_ID     0x49
+#define PMW3901_CHIP_ID_INVERSE 0x5F
+#define PMW3901_EXPECTED_ID_INV 0xB6
+
+// PMW3901 数据寄存器 (from pmw3901.py)
+#define PMW3901_MOTION_LATCH    0x02  // 运动寄存器锁存器
+#define PMW3901_DELTA_X_L       0x03  // Delta_X 低字节
+#define PMW3901_DELTA_X_H       0x04  // Delta_X 高字节
+#define PMW3901_DELTA_Y_L       0x05  // Delta_Y 低字节
+#define PMW3901_DELTA_Y_H       0x06  // Delta_Y 高字节
+
+// PMW3901 控制寄存器 (from pmw3901.py)
+#define PMW3901_POWER_RESET     0x3A  // 电源复位寄存器 (写入0x5A执行复位)
+#define PMW3901_PAGE_SELECT     0x7F  // 页面选择寄存器
 
 // SPI针脚定义 (直接硬编码，匹配根目录ESP32配置)
 #define PMW3901_SPI_SCK     18   // GPIO 18
@@ -35,7 +49,7 @@ static spi_device_handle_t pmw3901_spi;
 static bool pmw3901_spi_read_reg(uint8_t reg, uint8_t* data)
 {
     spi_transaction_t trans = {0};
-    uint8_t tx_data[2] = {reg, 0x00};  // 读取命令
+    uint8_t tx_data[2] = {reg & 0x7F, 0x00};  // 读取命令 (清除MSB)
     uint8_t rx_data[2] = {0};
     
     trans.length = 16;  // 16位 (2字节)
@@ -48,6 +62,84 @@ static bool pmw3901_spi_read_reg(uint8_t reg, uint8_t* data)
         return true;
     }
     return false;
+}
+
+// SPI写入函数 (根据pmw3901.py)
+static bool pmw3901_spi_write_reg(uint8_t reg, uint8_t data)
+{
+    spi_transaction_t trans = {0};
+    uint8_t tx_data[2] = {reg | 0x80, data};  // 写入命令 (设置MSB)
+    
+    trans.length = 16;  // 16位 (2字节)
+    trans.tx_buffer = tx_data;
+    
+    esp_err_t ret = spi_device_transmit(pmw3901_spi, &trans);
+    return (ret == ESP_OK);
+}
+
+// PMW3901初始化寄存器序列 (从pmw3901.py完整复制)
+static void pmw3901_init_registers(void)
+{
+    pmw3901_spi_write_reg(0x7F, 0x00);
+    pmw3901_spi_write_reg(0x61, 0xAD);
+    pmw3901_spi_write_reg(0x7F, 0x03);
+    pmw3901_spi_write_reg(0x40, 0x00);
+    pmw3901_spi_write_reg(0x7F, 0x05);
+    pmw3901_spi_write_reg(0x41, 0xB3);
+    pmw3901_spi_write_reg(0x43, 0xF1);
+    pmw3901_spi_write_reg(0x45, 0x14);
+    pmw3901_spi_write_reg(0x5B, 0x32);
+    pmw3901_spi_write_reg(0x5F, 0x34);
+    pmw3901_spi_write_reg(0x7B, 0x08);
+    pmw3901_spi_write_reg(0x7F, 0x06);
+    pmw3901_spi_write_reg(0x44, 0x1B);
+    pmw3901_spi_write_reg(0x40, 0xBF);
+    pmw3901_spi_write_reg(0x4E, 0x3F);
+    pmw3901_spi_write_reg(0x7F, 0x08);
+    pmw3901_spi_write_reg(0x65, 0x20);
+    pmw3901_spi_write_reg(0x6A, 0x18);
+    pmw3901_spi_write_reg(0x7F, 0x09);
+    pmw3901_spi_write_reg(0x4F, 0xAF);
+    pmw3901_spi_write_reg(0x5F, 0x40);
+    pmw3901_spi_write_reg(0x48, 0x80);
+    pmw3901_spi_write_reg(0x49, 0x80);
+    pmw3901_spi_write_reg(0x57, 0x77);
+    pmw3901_spi_write_reg(0x7F, 0x0A);
+    pmw3901_spi_write_reg(0x42, 0x60);
+    pmw3901_spi_write_reg(0x7F, 0x0B);
+    pmw3901_spi_write_reg(0x41, 0xDA);
+    pmw3901_spi_write_reg(0x45, 0x17);
+    pmw3901_spi_write_reg(0x5F, 0x50);
+    pmw3901_spi_write_reg(0x7B, 0x08);
+    pmw3901_spi_write_reg(0x7F, 0x0C);
+    pmw3901_spi_write_reg(0x44, 0x96);
+    pmw3901_spi_write_reg(0x5B, 0x65);
+    pmw3901_spi_write_reg(0x7F, 0x0D);
+    pmw3901_spi_write_reg(0x48, 0x6A);
+    pmw3901_spi_write_reg(0x6F, 0x39);
+    pmw3901_spi_write_reg(0x7F, 0x0E);
+    pmw3901_spi_write_reg(0x40, 0x48);
+    pmw3901_spi_write_reg(0x41, 0xDD);
+    pmw3901_spi_write_reg(0x6E, 0x8A);
+    pmw3901_spi_write_reg(0x7F, 0x0F);
+    pmw3901_spi_write_reg(0x5D, 0x73);
+    pmw3901_spi_write_reg(0x7F, 0x10);
+    pmw3901_spi_write_reg(0x40, 0x19);
+    pmw3901_spi_write_reg(0x7F, 0x11);
+    pmw3901_spi_write_reg(0x40, 0x40);
+    pmw3901_spi_write_reg(0x7F, 0x12);
+    pmw3901_spi_write_reg(0x6D, 0x1C);
+    pmw3901_spi_write_reg(0x71, 0x23);
+    pmw3901_spi_write_reg(0x7F, 0x13);
+    pmw3901_spi_write_reg(0x40, 0x20);
+    pmw3901_spi_write_reg(0x6E, 0x34);
+    pmw3901_spi_write_reg(0x7F, 0x14);
+    pmw3901_spi_write_reg(0x40, 0x41);
+    pmw3901_spi_write_reg(0x42, 0xC1);
+    pmw3901_spi_write_reg(0x74, 0x2B);
+    pmw3901_spi_write_reg(0x7F, 0x15);
+    pmw3901_spi_write_reg(0x40, 0x90);
+    pmw3901_spi_write_reg(0x7F, 0x00);
 }
 
 // SPI初始化函数
@@ -100,13 +192,36 @@ static bool testSensorPresence(void)
     // 等待传感器启动
     vTaskDelay(50 / portTICK_PERIOD_MS);
     
+    // 执行电源复位 (根据pmw3901.py)
+    pmw3901_spi_write_reg(PMW3901_POWER_RESET, 0x5A);
+    vTaskDelay(pdMS_TO_TICKS(5)); // 等待5ms
+    
     // Try to read WHO_AM_I register from PMW3901 via SPI
-    if (pmw3901_spi_read_reg(PMW3901_WHO_AM_I, &whoAmI)) {
-        if (whoAmI == PMW3901_EXPECTED_ID) {
-            ESP_LOGI(TAG, "PMW3901 optical flow sensor detected via SPI (ID: 0x%02X)", whoAmI);
+    uint8_t chipIdInverse;
+    if (pmw3901_spi_read_reg(PMW3901_WHO_AM_I, &whoAmI) &&
+        pmw3901_spi_read_reg(PMW3901_CHIP_ID_INVERSE, &chipIdInverse)) {
+        
+        if (whoAmI == PMW3901_EXPECTED_ID && chipIdInverse == PMW3901_EXPECTED_ID_INV) {
+            ESP_LOGI(TAG, "PMW3901 optical flow sensor detected via SPI (ID: 0x%02X, INV: 0x%02X)", 
+                     whoAmI, chipIdInverse);
+            
+            // 清除运动寄存器 (根据pmw3901.py)
+            uint8_t dummy;
+            pmw3901_spi_read_reg(PMW3901_MOTION_LATCH, &dummy);
+            pmw3901_spi_read_reg(PMW3901_DELTA_X_L, &dummy);
+            pmw3901_spi_read_reg(PMW3901_DELTA_X_H, &dummy);
+            pmw3901_spi_read_reg(PMW3901_DELTA_Y_L, &dummy);
+            pmw3901_spi_read_reg(PMW3901_DELTA_Y_H, &dummy);
+            vTaskDelay(pdMS_TO_TICKS(1)); // 等待1ms
+            
+            // 执行完整的传感器初始化序列 (从pmw3901.py)
+            pmw3901_init_registers();
+            ESP_LOGI(TAG, "PMW3901 initialization complete");
+            
             return true;
         } else {
-            ESP_LOGW(TAG, "Unknown optical flow sensor via SPI (ID: 0x%02X)", whoAmI);
+            ESP_LOGW(TAG, "Wrong chip ID from PMW3901: expected 0x%02X/0x%02X, got 0x%02X/0x%02X", 
+                     PMW3901_EXPECTED_ID, PMW3901_EXPECTED_ID_INV, whoAmI, chipIdInverse);
             return false;
         }
     }
@@ -150,12 +265,53 @@ bool opticalFlowReadMeasurement(flowMeasurement_t* flow)
         return false;
     }
 
-    // TODO: Read actual sensor data
-    // For now, provide dummy data only if sensor is present
-    flow->dpixelx = 0.0f;
-    flow->dpixely = 0.0f;
-    flow->stdDevX = 0.0f;
-    flow->stdDevY = 0.0f;
+    // 读取PMW3901传感器数据 (按照pmw3901.py的方法)
+    uint8_t delta_x_l, delta_x_h;
+    uint8_t delta_y_l, delta_y_h;
+    
+    // 锁存运动寄存器 (必须先读取0x02来锁存数据)
+    uint8_t motion_latch;
+    if (!pmw3901_spi_read_reg(PMW3901_MOTION_LATCH, &motion_latch)) {
+        return false;
+    }
+    
+    // 读取X和Y位移数据 (16位有符号整数)
+    if (!pmw3901_spi_read_reg(PMW3901_DELTA_X_L, &delta_x_l) ||
+        !pmw3901_spi_read_reg(PMW3901_DELTA_X_H, &delta_x_h) ||
+        !pmw3901_spi_read_reg(PMW3901_DELTA_Y_L, &delta_y_l) ||
+        !pmw3901_spi_read_reg(PMW3901_DELTA_Y_H, &delta_y_h)) {
+        return false;
+    }
+    
+    // 添加调试信息输出原始寄存器值
+    static uint32_t debug_counter = 0;
+    if (++debug_counter % 250 == 0) { // 每秒打印一次 (250Hz)
+        char debug_str[128];
+        snprintf(debug_str, sizeof(debug_str), "PMW3901 Raw: latch=0x%02X, xL=0x%02X, xH=0x%02X, yL=0x%02X, yH=0x%02X\n",
+                motion_latch, delta_x_l, delta_x_h, delta_y_l, delta_y_h);
+        debugpeintf(debug_str);
+    }
+    
+    // 组合16位有符号数据 (按照pmw3901.py的方法)
+    int16_t delta_x = (int16_t)((delta_x_h << 8) | delta_x_l);
+    int16_t delta_y = (int16_t)((delta_y_h << 8) | delta_y_l);
+    
+    // 处理有符号数转换 (按照pmw3901.py的方法)
+    if (delta_x & 0x8000) {
+        delta_x -= 0x10000;
+    }
+    if (delta_y & 0x8000) {
+        delta_y -= 0x10000;
+    }
+    
+    // 转换为像素位移 (PMW3901输出单位已经是像素)
+    flow->dpixelx = (float)delta_x;
+    flow->dpixely = (float)delta_y;
+    
+    // 设置固定的标准差值
+    flow->stdDevX = 0.5f;
+    flow->stdDevY = 0.5f;
+    
     flow->dt = 0.004f; // 250Hz update rate
     
     return true;

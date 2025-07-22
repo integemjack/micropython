@@ -181,6 +181,31 @@ void stabilizerTask(void* param)
         if (RATE_DO_EXECUTE(POSITION_ESTIMAT_RATE, tick))
         {
             positionEstimate(&sensorData, &state, POSITION_ESTIMAT_DT);
+            
+            // 如果有光流数据，更新X和Y位置估计
+            if (flowAvailable && flowData.dt > 0) {
+                // 简单的光流积分位置估计
+                static float flowPosX = 0.0f;
+                static float flowPosY = 0.0f;
+                
+                // 将像素位移转换为实际位移 (需要根据飞行高度调整比例)
+                float height = state.position.z > 5.0f ? state.position.z : 20.0f; // 默认高度20cm
+                float pixelToMeter = height * 0.001f; // 粗略换算：1像素 ≈ 高度*0.001米
+                
+                // 计算速度 (像素/秒 -> 米/秒)
+                float velX = (flowData.dpixelx / flowData.dt) * pixelToMeter;
+                float velY = (flowData.dpixely / flowData.dt) * pixelToMeter;
+                
+                // 积分得到位置
+                flowPosX += velX * POSITION_ESTIMAT_DT;
+                flowPosY += velY * POSITION_ESTIMAT_DT;
+                
+                // 更新状态估计
+                state.position.x = flowPosX;
+                state.position.y = flowPosY;
+                state.velocity.x = velX;
+                state.velocity.y = velY;
+            }
         }
     
         if (RATE_DO_EXECUTE(RATE_100_HZ, tick) && getIsCalibrated()==true)
@@ -194,53 +219,51 @@ void stabilizerTask(void* param)
         }       
 
         // 自动悬停逻辑：无人控制或无输入时自动悬停
-        if (RATE_DO_EXECUTE(RATE_100_HZ, tick))
-        {
-            bool currentHoverState = getLockStatus() || isNoManualInput();
+        // if (RATE_DO_EXECUTE(RATE_100_HZ, tick))
+        // {
+        //     bool currentHoverState = getLockStatus() || isNoManualInput();
             
-            if(currentHoverState) {
-                Axis3f acc, vel, pos;
-                getStateData(&acc, &vel, &pos);
+        //     if(currentHoverState) {
+        //         Axis3f acc, vel, pos;
+        //         getStateData(&acc, &vel, &pos);
                                 
-                // 状态变化时打印一次
-                if (!lastHoverState) {
-                    char debug_str[64];
-                    snprintf(debug_str, sizeof(debug_str), "Auto hover activated: pos(%.2f, %.2f, %.2f)\n", pos.x, pos.y, pos.z);
-                    debugpeintf(debug_str);
-                }
+        //         // 状态变化时打印一次
+        //         // if (!lastHoverState) {
+        //         //     char debug_str[64];
+        //         //     snprintf(debug_str, sizeof(debug_str), "Auto hover activated: pos(%.2f, %.2f, %.2f)\n", pos.x, pos.y, pos.z);
+        //         //     debugpeintf(debug_str);
+        //         // }
 
-                stabilizerHoverControl(pos.x, pos.y, pos.z, 0.01f);
-            } else {
-                // 状态变化时打印一次
-                if (lastHoverState) {
-                    debugpeintf("Auto hover deactivated: manual control\n");
-                }
+        //         stabilizerHoverControl(pos.x, pos.y, pos.z, 0.01f);
+        //     } else {
+        //         // 状态变化时打印一次
+        //         // if (lastHoverState) {
+        //         //     debugpeintf("Auto hover deactivated: manual control\n");
+        //         // }
                 
-                hoverControlEnable(false); // 有人操作时关闭自动悬停
-            }
+        //         hoverControlEnable(false); // 有人操作时关闭自动悬停
+        //     }
             
-            lastHoverState = currentHoverState;
-        }
+        //     // lastHoverState = currentHoverState;
+        // }
 
         // 每秒打印一次悬停状态调试信息
         if (RATE_DO_EXECUTE(RATE_1_HZ, tick))
         {
             bool currentHoverState = getLockStatus() || isNoManualInput();
-
-            char debug_str[64];
-            snprintf(debug_str, sizeof(debug_str), "currentHoverState: %d\n", currentHoverState);
-            debugpeintf(debug_str);
-            snprintf(debug_str, sizeof(debug_str), "getLockStatus: %d\n", getLockStatus());
-            debugpeintf(debug_str);
-            snprintf(debug_str, sizeof(debug_str), "isNoManualInput: %d\n", isNoManualInput());
+            
+            // 添加光流传感器调试信息
+            char debug_str[80];
+            snprintf(debug_str, sizeof(debug_str), "Flow: avail=%d, dx=%.1f, dy=%.1f, dt=%.3f\n", 
+                    flowAvailable, flowData.dpixelx, flowData.dpixely, flowData.dt);
             debugpeintf(debug_str);
             
             if(currentHoverState) {
                 Axis3f acc, vel, pos;
                 getStateData(&acc, &vel, &pos);
                 
-                char debug_str[64];
-                snprintf(debug_str, sizeof(debug_str), "Auto hover activated: pos(%.2f, %.2f, %.2f)\n", pos.x, pos.y, pos.z);
+                snprintf(debug_str, sizeof(debug_str), "Auto hover: pos(%.2f, %.2f, %.2f), vel(%.2f, %.2f)\n", 
+                        pos.x, pos.y, pos.z, vel.x, vel.y);
                 debugpeintf(debug_str);
             } else {
                 debugpeintf("Auto hover deactivated: manual control\n");
