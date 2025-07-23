@@ -53,6 +53,19 @@ void readOptionalSensors(void)
             // 如果读取失败，清零数据
             memset(&flowData, 0, sizeof(flowData));
         }
+    } else {
+        // 如果传感器不存在，尝试重新初始化（仅在第一次失败时）
+        static bool flowReinitAttempted = false;
+        if (!flowReinitAttempted) {
+            flowReinitAttempted = true;
+            if (opticalFlowInit()) {
+                // 重新初始化成功，尝试读取数据
+                flowAvailable = opticalFlowReadMeasurement(&flowData);
+                if (!flowAvailable) {
+                    memset(&flowData, 0, sizeof(flowData));
+                }
+            }
+        }
     }
     
     // 安全读取TOF传感器数据
@@ -61,6 +74,19 @@ void readOptionalSensors(void)
         if (!tofAvailable) {
             // 如果读取失败，清零数据
             memset(&tofData, 0, sizeof(tofData));
+        }
+    } else {
+        // 如果传感器不存在，尝试重新初始化（仅在第一次失败时）
+        static bool tofReinitAttempted = false;
+        if (!tofReinitAttempted) {
+            tofReinitAttempted = true;
+            if (tofSensorInit()) {
+                // 重新初始化成功，尝试读取数据
+                tofAvailable = tofSensorReadMeasurement(&tofData);
+                if (!tofAvailable) {
+                    memset(&tofData, 0, sizeof(tofData));
+                }
+            }
         }
     }
 }
@@ -165,6 +191,8 @@ void stabilizerTask(void* param)
         vTaskDelayUntil(&lastWakeTime, MAIN_LOOP_DT);
     }
 
+    uint32_t loop_count = 0;
+
     while(1) 
     {
         vTaskDelayUntil(&lastWakeTime, 1);
@@ -219,7 +247,7 @@ void stabilizerTask(void* param)
         }       
 
         // 自动悬停逻辑：只在完全无遥控器输入且未锁定时启用
-        if (RATE_DO_EXECUTE(RATE_100_HZ, tick))
+        if (RATE_DO_EXECUTE(RATE_50_HZ, tick))
         {
 
             char debug_str[64];
@@ -230,30 +258,33 @@ void stabilizerTask(void* param)
             // snprintf(debug_str, sizeof(debug_str), "isFlying: %d\n", isFlying);
             // debugpeintf(debug_str);
 
-            bool isRCConnected = !getRCLocked();  // 遥控器连接状态
-            bool hasManualInput = !isNoManualInput();  // 是否有手动输入
-            bool shouldHover = isFlying && !hasManualInput;  // 只在连接但无输入时悬停
+            // bool isRCConnected = !getRCLocked();  // 遥控器连接状态
+            // bool hasManualInput = !isNoManualInput();  // 是否有手动输入
+            // bool shouldHover = isFlying && !hasManualInput;  // 只在连接但无输入时悬停
 
-            if(shouldHover) {
+            if(isFlying) {
 
                 // 已经在飞行状态，执行正常悬停控制
-                Axis3f acc, vel, pos;
-                getStateData(&acc, &vel, &pos);
-                    
-                snprintf(debug_str, sizeof(debug_str), "Auto hover activated: pos(%.2f, %.2f, %.2f)\n", pos.x, pos.y, pos.z);
-                debugpeintf(debug_str);
 
+                if (loop_count % 200 == 0) {
+                    Axis3f acc, vel, pos;
+                    getStateData(&acc, &vel, &pos);
+                    snprintf(debug_str, sizeof(debug_str), "Auto hover activated: pos(%.2f, %.2f, %.2f)\n", pos.x, pos.y, pos.z);
+                    debugpeintf(debug_str);
+                }
                 // stabilizerHoverControl(pos.x, pos.y, pos.z, 0.01f);
             } else {
                 // 状态变化时打印一次
-                if (lastHoverState) {
+                if (loop_count % 200 == 0) {
                     debugpeintf("Auto hover deactivated: manual control or RC disconnected\n");
+                    
                 }
+                // hoverControlEnable(false); // 有人操作或遥控器断开时关闭自动悬停
                 
-                hoverControlEnable(false); // 有人操作或遥控器断开时关闭自动悬停
             }
-            
-            lastHoverState = shouldHover;
+
+            loop_count++;
+            // lastHoverState = shouldHover;
         }
 
         if (RATE_DO_EXECUTE(RATE_500_HZ, tick) && (getCommanderCtrlMode() != 0x03))
