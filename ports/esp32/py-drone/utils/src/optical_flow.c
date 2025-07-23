@@ -42,7 +42,7 @@ static bool testSensorPresence(void)
         return false;
     }
     
-    vTaskDelay(pdMS_TO_TICKS(4000));
+    vTaskDelay(pdMS_TO_TICKS(1000));
     
     // Begin sensor initialization
     ret = pmw3901_begin();

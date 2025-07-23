@@ -53,19 +53,6 @@ void readOptionalSensors(void)
             // 如果读取失败，清零数据
             memset(&flowData, 0, sizeof(flowData));
         }
-    } else {
-        // 如果传感器不存在，尝试重新初始化（仅在第一次失败时）
-        static bool flowReinitAttempted = false;
-        if (!flowReinitAttempted) {
-            flowReinitAttempted = true;
-            if (opticalFlowInit()) {
-                // 重新初始化成功，尝试读取数据
-                flowAvailable = opticalFlowReadMeasurement(&flowData);
-                if (!flowAvailable) {
-                    memset(&flowData, 0, sizeof(flowData));
-                }
-            }
-        }
     }
     
     // 安全读取TOF传感器数据
@@ -75,25 +62,14 @@ void readOptionalSensors(void)
             // 如果读取失败，清零数据
             memset(&tofData, 0, sizeof(tofData));
         }
-    } else {
-        // 如果传感器不存在，尝试重新初始化（仅在第一次失败时）
-        static bool tofReinitAttempted = false;
-        if (!tofReinitAttempted) {
-            tofReinitAttempted = true;
-            if (tofSensorInit()) {
-                // 重新初始化成功，尝试读取数据
-                tofAvailable = tofSensorReadMeasurement(&tofData);
-                if (!tofAvailable) {
-                    memset(&tofData, 0, sizeof(tofData));
-                }
-            }
-        }
     }
 }
 
 TaskHandle_t stabilizerHandle = NULL;
+TaskHandle_t readOptionalSensorsHandle = NULL;
 
 void stabilizerTask(void* param);
+void opticalflowTask(void* param);
 
 void stabilizerInit(void)
 {
@@ -102,6 +78,22 @@ void stabilizerInit(void)
 	hoverControlInit();		/* 悬停控制初始化 */
 	powerDistributionInit();		/*电机初始化*/
 	xTaskCreate(stabilizerTask, STABILIZER_TASK_NAME, STABILIZER_TASK_STACKSIZE, NULL, STABILIZER_TASK_PRI, &stabilizerHandle);	
+    char debug_str[256];
+	if (opticalFlowIsPresent()) {
+		snprintf(debug_str, sizeof(debug_str), "Optical flow sensor present\n");
+        debugpeintf(debug_str);
+    } else {
+        snprintf(debug_str, sizeof(debug_str), "Optical flow sensor not present\n");
+        debugpeintf(debug_str);
+    }
+    if (tofSensorIsPresent()) {
+        snprintf(debug_str, sizeof(debug_str), "TOF sensor present\n");
+        debugpeintf(debug_str);
+    } else {
+        snprintf(debug_str, sizeof(debug_str), "TOF sensor not present\n");
+        debugpeintf(debug_str);
+    }
+
 	isInit = true;
 }
 void stabilizerDeInit(void)
@@ -109,6 +101,10 @@ void stabilizerDeInit(void)
 	if( stabilizerHandle != NULL )
 	{
 		vTaskDelete( stabilizerHandle );
+	}
+	if( readOptionalSensorsHandle != NULL )
+	{
+		vTaskDelete( readOptionalSensorsHandle );
 	}
 	isInit = false;
 }
@@ -168,138 +164,88 @@ static void fastAdjustPosZ(void)
 	}	
 }
 
-// 新增：定点飞行控制方法
-void stabilizerHoverControl(float targetX, float targetY, float targetHeight, float dt)
+void opticalflowTask(void* param)
 {
-    // 启用定点控制
-    hoverControlEnable(true);
-    hoverControlSetTarget(targetX, targetY, targetHeight);
-    // 调用定点控制更新
-    hoverControlUpdate(flowAvailable ? &flowData : NULL, tofAvailable ? &tofData : NULL, &setpoint, &state, dt);
+	uint32_t tick = 0;
+	uint32_t lastWakeTime = xTaskGetTickCount();//getSysTickCnt();
+	char debug_str[256];
+
+	vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(1000));
+
+	while(1)
+	{
+		
+		vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(1000));
+		readOptionalSensors();
+		
+		snprintf(debug_str, sizeof(debug_str), "Optical flow task: %.2f, %.2f\n", flowData.dpixelx, flowData.dpixely);
+		debugpeintf(debug_str);
+		snprintf(debug_str, sizeof(debug_str), "TOF task: %.2f, %.2f\n", tofData.distance, tofData.stdDev);
+		debugpeintf(debug_str);
+
+	}
 }
 
 void stabilizerTask(void* param)
 {
-    uint32_t tick = 0;
-    uint32_t lastWakeTime = xTaskGetTickCount();//getSysTickCnt();
-    bool lastHoverState = false;      // 记录上次悬停状态
-    
-    ledseqRun(SYS_LED, seq_alive);
+	uint32_t tick = 0;
+	uint32_t lastWakeTime = xTaskGetTickCount();//getSysTickCnt();
+	
+	ledseqRun(SYS_LED, seq_alive);
 
-    while(!sensorsAreCalibrated())
-    {
-        vTaskDelayUntil(&lastWakeTime, MAIN_LOOP_DT);
-    }
+	while(!sensorsAreCalibrated())
+	{
+		vTaskDelayUntil(&lastWakeTime, MAIN_LOOP_DT);
+	}
 
-    uint32_t loop_count = 0;
+	if(opticalFlowIsPresent()) {
+		xTaskCreate(opticalflowTask, "opticalflowTask", STABILIZER_TASK_STACKSIZE, NULL, STABILIZER_TASK_PRI, &readOptionalSensorsHandle);
+	}
 
-    while(1) 
-    {
-        vTaskDelayUntil(&lastWakeTime, 1);
+	while(1) 
+	{
+		vTaskDelayUntil(&lastWakeTime, 1);
 
-        if (RATE_DO_EXECUTE(RATE_500_HZ, tick))
-        {
-            sensorsAcquire(&sensorData, tick);
-            readOptionalSensors(); // Read flow and TOF sensors
-        }
-        if (RATE_DO_EXECUTE(ATTITUDE_ESTIMAT_RATE, tick))
-        {
-            imuUpdate(sensorData.acc, sensorData.gyro, &state, ATTITUDE_ESTIMAT_DT);
-        }
-        if (RATE_DO_EXECUTE(POSITION_ESTIMAT_RATE, tick))
-        {
-            positionEstimate(&sensorData, &state, POSITION_ESTIMAT_DT);
-            
-            // 如果有光流数据，更新X和Y位置估计
-            if (flowAvailable && flowData.dt > 0) {
-                // 简单的光流积分位置估计
-                static float flowPosX = 0.0f;
-                static float flowPosY = 0.0f;
-                
-                // 将像素位移转换为实际位移 (需要根据飞行高度调整比例)
-                float height = state.position.z > 5.0f ? state.position.z : 20.0f; // 默认高度20cm
-                float pixelToMeter = height * 0.001f; // 粗略换算：1像素 ≈ 高度*0.001米
-                
-                // 计算速度 (像素/秒 -> 米/秒)
-                float velX = (flowData.dpixelx / flowData.dt) * pixelToMeter;
-                float velY = (flowData.dpixely / flowData.dt) * pixelToMeter;
-                
-                // 积分得到位置
-                flowPosX += velX * POSITION_ESTIMAT_DT;
-                flowPosY += velY * POSITION_ESTIMAT_DT;
-                
-                // 更新状态估计
-                state.position.x = flowPosX;
-                state.position.y = flowPosY;
-                state.velocity.x = velX;
-                state.velocity.y = velY;
-            }
-        }
-    
-        if (RATE_DO_EXECUTE(RATE_100_HZ, tick) && getIsCalibrated()==true)
-        {
-            commanderGetSetpoint(&setpoint, &state);
-        }
+		if (RATE_DO_EXECUTE(RATE_1_HZ, tick)) {
+			debugpeintf("running...\n");
+		}
 
-        if (RATE_DO_EXECUTE(RATE_250_HZ, tick))
-        {
-            fastAdjustPosZ();
-        }       
+		if (RATE_DO_EXECUTE(RATE_500_HZ, tick))
+		{
+			sensorsAcquire(&sensorData, tick);
+		}
+		if (RATE_DO_EXECUTE(ATTITUDE_ESTIMAT_RATE, tick))
+		{
+			imuUpdate(sensorData.acc, sensorData.gyro, &state, ATTITUDE_ESTIMAT_DT);
+		}
+		if (RATE_DO_EXECUTE(POSITION_ESTIMAT_RATE, tick))
+		{
+			positionEstimate(&sensorData, &state, POSITION_ESTIMAT_DT);
+		}
+	
+		if (RATE_DO_EXECUTE(RATE_100_HZ, tick) && getIsCalibrated()==true)
+		{
+			commanderGetSetpoint(&setpoint, &state);
+		}
 
-        // 自动悬停逻辑：只在完全无遥控器输入且未锁定时启用
-        if (RATE_DO_EXECUTE(RATE_50_HZ, tick))
-        {
+		if (RATE_DO_EXECUTE(RATE_250_HZ, tick))
+		{
+			fastAdjustPosZ();
+		}		
 
-            char debug_str[64];
+		if (RATE_DO_EXECUTE(RATE_500_HZ, tick) && (getCommanderCtrlMode() != 0x03))
+		{
+			flyerFlipCheck(&setpoint, &control, &state);	
+		}
+		anomalDetec(&sensorData, &state, &control);			
+		stateControl(&control, &sensorData, &state, &setpoint, tick);
 
-            // 检查是否在飞行状态
-            bool isFlying = getCommanderKeyFlight();
-
-            // snprintf(debug_str, sizeof(debug_str), "isFlying: %d\n", isFlying);
-            // debugpeintf(debug_str);
-
-            // bool isRCConnected = !getRCLocked();  // 遥控器连接状态
-            // bool hasManualInput = !isNoManualInput();  // 是否有手动输入
-            // bool shouldHover = isFlying && !hasManualInput;  // 只在连接但无输入时悬停
-
-            if(isFlying) {
-
-                // 已经在飞行状态，执行正常悬停控制
-
-                if (loop_count % 200 == 0) {
-                    Axis3f acc, vel, pos;
-                    getStateData(&acc, &vel, &pos);
-                    snprintf(debug_str, sizeof(debug_str), "Auto hover activated: pos(%.2f, %.2f, %.2f)\n", pos.x, pos.y, pos.z);
-                    debugpeintf(debug_str);
-                }
-                // stabilizerHoverControl(pos.x, pos.y, pos.z, 0.01f);
-            } else {
-                // 状态变化时打印一次
-                if (loop_count % 200 == 0) {
-                    debugpeintf("Auto hover deactivated: manual control or RC disconnected\n");
-                    
-                }
-                // hoverControlEnable(false); // 有人操作或遥控器断开时关闭自动悬停
-                
-            }
-
-            loop_count++;
-            // lastHoverState = shouldHover;
-        }
-
-        if (RATE_DO_EXECUTE(RATE_500_HZ, tick) && (getCommanderCtrlMode() != 0x03))
-        {
-            flyerFlipCheck(&setpoint, &control, &state);   
-        }
-        anomalDetec(&sensorData, &state, &control);         
-        stateControl(&control, &sensorData, &state, &setpoint, tick);
-
-        if (RATE_DO_EXECUTE(RATE_500_HZ, tick))
-        {
-            powerDistribution(&control);
-        }
-        tick++;
-    }
+		if (RATE_DO_EXECUTE(RATE_500_HZ, tick))
+		{
+			powerDistribution(&control);
+		}
+		tick++;
+	}
 }
 
 void getAttitudeData(attitude_t* get)
@@ -348,5 +294,3 @@ void getStateData(Axis3f* acc, Axis3f* vel, Axis3f* pos)
 	pos->y = 1.0f * state.position.y;
 	pos->z = 1.0f * state.position.z;
 }
-
-

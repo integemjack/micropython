@@ -349,7 +349,7 @@ STATIC mp_obj_t drone_hover_control(size_t n_args, const mp_obj_t *pos_args, mp_
     // 修复：dt 默认值
     float dt = (args[3].u_obj == mp_const_none) ? 0.01f : mp_obj_get_float(args[3].u_obj);
 
-    stabilizerHoverControl(x, y, height, dt);
+    // stabilizerHoverControl(x, y, height, dt);
     return mp_const_none;
 }
 STATIC MP_DEFINE_CONST_FUN_OBJ_KW(drone_hover_control_obj, 1, drone_hover_control);
