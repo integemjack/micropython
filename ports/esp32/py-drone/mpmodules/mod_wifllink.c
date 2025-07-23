@@ -304,6 +304,7 @@ void wifiInit(void )
     } else {
         ESP_LOGI(TAG,"UDP server create socket succeed!!!");
     } 
+    // 单核模式：创建WiFi任务，让FreeRTOS调度器自动分配
     xTaskCreate(udp_server_tx_task, UDP_TX_TASK_NAME, 4*1024, NULL, UDP_TX_TASK_PRI, NULL);
     xTaskCreate(udp_server_rx_task, UDP_RX_TASK_NAME, 4*1024, NULL, UDP_RX_TASK_PRI, NULL);
     isInit = true;

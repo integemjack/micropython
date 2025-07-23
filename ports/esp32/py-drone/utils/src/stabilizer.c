@@ -77,22 +77,12 @@ void stabilizerInit(void)
 	stateControlInit();		/*姿态PID初始化*/
 	hoverControlInit();		/* 悬停控制初始化 */
 	powerDistributionInit();		/*电机初始化*/
+
+	// 单核模式下的优化策略：
+	// 稳定器任务保持高优先级，负责飞控核心逻辑
+	// 光流任务使用最低优先级，仅在系统空闲时运行
 	xTaskCreate(stabilizerTask, STABILIZER_TASK_NAME, STABILIZER_TASK_STACKSIZE, NULL, STABILIZER_TASK_PRI, &stabilizerHandle);	
-    char debug_str[256];
-	if (opticalFlowIsPresent()) {
-		snprintf(debug_str, sizeof(debug_str), "Optical flow sensor present\n");
-        debugpeintf(debug_str);
-    } else {
-        snprintf(debug_str, sizeof(debug_str), "Optical flow sensor not present\n");
-        debugpeintf(debug_str);
-    }
-    if (tofSensorIsPresent()) {
-        snprintf(debug_str, sizeof(debug_str), "TOF sensor present\n");
-        debugpeintf(debug_str);
-    } else {
-        snprintf(debug_str, sizeof(debug_str), "TOF sensor not present\n");
-        debugpeintf(debug_str);
-    }
+	
 
 	isInit = true;
 }
@@ -164,32 +154,11 @@ static void fastAdjustPosZ(void)
 	}	
 }
 
-void opticalflowTask(void* param)
-{
-	uint32_t tick = 0;
-	uint32_t lastWakeTime = xTaskGetTickCount();//getSysTickCnt();
-	char debug_str[256];
-
-	vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(1000));
-
-	while(1)
-	{
-		
-		vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(1000));
-		readOptionalSensors();
-		
-		snprintf(debug_str, sizeof(debug_str), "Optical flow task: %.2f, %.2f\n", flowData.dpixelx, flowData.dpixely);
-		debugpeintf(debug_str);
-		snprintf(debug_str, sizeof(debug_str), "TOF task: %.2f, %.2f\n", tofData.distance, tofData.stdDev);
-		debugpeintf(debug_str);
-
-	}
-}
-
 void stabilizerTask(void* param)
 {
 	uint32_t tick = 0;
 	uint32_t lastWakeTime = xTaskGetTickCount();//getSysTickCnt();
+	char debug_str[80];
 	
 	ledseqRun(SYS_LED, seq_alive);
 
@@ -199,16 +168,28 @@ void stabilizerTask(void* param)
 	}
 
 	if(opticalFlowIsPresent()) {
-		xTaskCreate(opticalflowTask, "opticalflowTask", STABILIZER_TASK_STACKSIZE, NULL, STABILIZER_TASK_PRI, &readOptionalSensorsHandle);
+		snprintf(debug_str, sizeof(debug_str), "Optical flow sensor present\n");
+		debugpeintf(debug_str);
+	} else {
+		snprintf(debug_str, sizeof(debug_str), "Optical flow sensor not present\n");
+		debugpeintf(debug_str);
+	}
+
+	if (tofSensorIsPresent()) {
+		snprintf(debug_str, sizeof(debug_str), "TOF sensor present\n");
+		debugpeintf(debug_str);
+	} else {
+		snprintf(debug_str, sizeof(debug_str), "TOF sensor not present\n");
+		debugpeintf(debug_str);
 	}
 
 	while(1) 
 	{
 		vTaskDelayUntil(&lastWakeTime, 1);
 
-		if (RATE_DO_EXECUTE(RATE_1_HZ, tick)) {
-			debugpeintf("running...\n");
-		}
+		// if (RATE_DO_EXECUTE(RATE_1_HZ, tick)) {
+		// 	debugpeintf("running...\n");
+		// }
 
 		if (RATE_DO_EXECUTE(RATE_500_HZ, tick))
 		{
@@ -243,6 +224,24 @@ void stabilizerTask(void* param)
 		if (RATE_DO_EXECUTE(RATE_500_HZ, tick))
 		{
 			powerDistribution(&control);
+		}
+
+		if (RATE_DO_EXECUTE(RATE_500_HZ, tick)) {
+			bool rc_active = !getLockStatus(); // getLockStatus() returns true when RC is disconnected
+			if (!rc_active) {
+				readOptionalSensors();
+				// snprintf(debug_str, sizeof(debug_str), "Flow[%s]: %.2f,%.2f TOF: %.2f, control: %.2d, %.2d, %.2d, %.2f\n", 
+				// 	rc_active ? "RC" : "IDLE",
+				// 	flowData.dpixelx, flowData.dpixely, tofData.distance,
+				// 	control.roll, control.pitch, control.yaw, control.thrust);
+				// debugpeintf(debug_str);
+			} else {
+				// snprintf(debug_str, sizeof(debug_str), "Flow[%s]: %.2f,%.2f TOF: %.2f, control: %.2d, %.2d, %.2d, %.2f\n", 
+				// 	rc_active ? "RC" : "IDLE",
+				// 	flowData.dpixelx, flowData.dpixely, tofData.distance,
+				// 	control.roll, control.pitch, control.yaw, control.thrust);
+				// debugpeintf(debug_str);
+			}
 		}
 		tick++;
 	}

@@ -31,7 +31,6 @@ static bool testSensorPresence(void)
     char debug_str[128];
     
     ESP_LOGI(TAG, "Checking for optical flow sensor...");
-    debugpeintf("Checking for optical flow sensor...\n");
     
     // Initialize PMW3901 driver with hardware pins
     esp_err_t ret = pmw3901_init(PMW3901_SPI_SCK, PMW3901_SPI_MOSI, PMW3901_SPI_MISO, PMW3901_SPI_CS);
@@ -53,17 +52,10 @@ static bool testSensorPresence(void)
         return false;
     }
     
-    // Check surface quality for diagnostic
+    // Check surface quality for diagnostic (减少输出以避免阻塞)
     uint8_t squal;
     if (pmw3901_read_surface_quality(&squal) == ESP_OK) {
-        snprintf(debug_str, sizeof(debug_str), "Initial surface quality: %d (>20 is good, >80 is excellent)\n", squal);
-        debugpeintf(debug_str);
-        if (squal < 20) {
-            debugpeintf("  Warning: Low surface quality may indicate:\n");
-            debugpeintf("  - Sensor too high above surface (optimal: 8-120mm)\n");
-            debugpeintf("  - Poor surface texture (needs non-reflective patterns)\n");
-            debugpeintf("  - Insufficient lighting\n");
-        }
+        ESP_LOGI(TAG, "Initial surface quality: %d", squal);
     }
     
     debugpeintf("✓ Optical flow sensor initialization completed successfully\n");
@@ -79,7 +71,6 @@ bool opticalFlowInit(void)
     }
 
     ESP_LOGI(TAG, "Initializing optical flow sensor...");
-    debugpeintf("Initializing optical flow sensor...\n");
     
     // Test if sensor is physically present
     isPresent = testSensorPresence();

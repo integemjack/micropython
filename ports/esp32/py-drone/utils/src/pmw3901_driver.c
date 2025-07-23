@@ -5,7 +5,6 @@
  */
 
 #include "pmw3901_driver.h"
-#include "sensors_mpu6050_spl06.h"
 #include "driver/spi_master.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
@@ -86,6 +85,9 @@ static esp_err_t pmw3901_write_reg(uint8_t reg, uint8_t value)
         gpio_set_level(dev.cs_pin, 1);
         return ret;
     }
+
+    // SPI运行在Core 1，不需要频繁让出CPU时间
+    esp_rom_delay_us(10);
     
     // Send value (exactly like Arduino SPI.transfer(value))
     spi_transaction_t trans2 = {
@@ -98,15 +100,9 @@ static esp_err_t pmw3901_write_reg(uint8_t reg, uint8_t value)
     esp_rom_delay_us(50);
     gpio_set_level(dev.cs_pin, 1);
     esp_rom_delay_us(200);  // Arduino has this delay
-    char debug_str[256];
+    // 减少调试输出以避免阻塞遥控器通信
     if (ret != ESP_OK) {
-        snprintf(debug_str, sizeof(debug_str), "SPI WRITE FAILED: reg=0x%02X, value=0x%02X, error=%s\n", reg, value, esp_err_to_name(ret));
-        debugpeintf(debug_str);
         ESP_LOGE(TAG, "SPI WRITE FAILED: reg=0x%02X, value=0x%02X, error=%s", reg, value, esp_err_to_name(ret));
-    } else {
-        snprintf(debug_str, sizeof(debug_str), "SPI WRITE: reg=0x%02X <- value=0x%02X\n", reg, value);
-        debugpeintf(debug_str);
-        ESP_LOGD(TAG, "SPI WRITE: reg=0x%02X <- value=0x%02X", reg, value);
     }
     
     return ret;
@@ -151,15 +147,9 @@ static esp_err_t pmw3901_read_reg(uint8_t reg, uint8_t* value)
     
     if (ret == ESP_OK) {
         *value = rx_data;
-        // Only log reads during initialization or errors
-        if (reg == 0x00 || reg == 0x5F || ret != ESP_OK) {
-            ESP_LOGD(TAG, "SPI READ: reg=0x%02X -> value=0x%02X", reg, rx_data);
-        }
+        // 减少调试输出以避免阻塞遥控器通信
     } else {
-        char debug_str[256];
         ESP_LOGE(TAG, "SPI READ FAILED: reg=0x%02X, error=%s", reg, esp_err_to_name(ret));
-        snprintf(debug_str, sizeof(debug_str), "SPI READ FAILED: reg=0x%02X, error=%s\n", reg, esp_err_to_name(ret));
-        debugpeintf(debug_str);
     }
     
     return ret;
@@ -179,9 +169,6 @@ esp_err_t pmw3901_init(int sck_pin, int mosi_pin, int miso_pin, int cs_pin)
     esp_err_t ret = gpio_config(&cs_cfg);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to configure CS GPIO: %s", esp_err_to_name(ret));
-        char debug_str[256];
-        snprintf(debug_str, sizeof(debug_str), "Failed to configure CS GPIO: %s\n", esp_err_to_name(ret));
-        debugpeintf(debug_str);
         return ret;
     }
     
@@ -201,9 +188,6 @@ esp_err_t pmw3901_init(int sck_pin, int mosi_pin, int miso_pin, int cs_pin)
     ret = spi_bus_initialize(SPI3_HOST, &bus_cfg, SPI_DMA_CH_AUTO);
     if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
         ESP_LOGE(TAG, "Failed to initialize SPI bus: %s", esp_err_to_name(ret));
-        char debug_str[256];
-        snprintf(debug_str, sizeof(debug_str), "Failed to initialize SPI bus: %s\n", esp_err_to_name(ret));
-        debugpeintf(debug_str);
         return ret;
     }
     
@@ -218,18 +202,12 @@ esp_err_t pmw3901_init(int sck_pin, int mosi_pin, int miso_pin, int cs_pin)
     ret = spi_bus_add_device(SPI3_HOST, &dev_cfg, &dev.spi);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to add SPI device: %s", esp_err_to_name(ret));
-        char debug_str[256];
-        snprintf(debug_str, sizeof(debug_str), "Failed to add SPI device: %s\n", esp_err_to_name(ret));
-        debugpeintf(debug_str);
         return ret;
     }
     
     dev.initialized = true;
     
     ESP_LOGI(TAG, "SPI initialized, waiting for sensor startup...");
-    char debug_str[256];
-    snprintf(debug_str, sizeof(debug_str), "SPI initialized, waiting for sensor startup...\n");
-    debugpeintf(debug_str);
     // vTaskDelay(pdMS_TO_TICKS(100));  // Reduced from 4s to 100ms to avoid blocking system init
     
     return ESP_OK;
@@ -237,16 +215,12 @@ esp_err_t pmw3901_init(int sck_pin, int mosi_pin, int miso_pin, int cs_pin)
 
 esp_err_t pmw3901_begin(void)
 {
-    char debug_str[256];
     if (!dev.initialized) {
         ESP_LOGE(TAG, "Device not initialized");
-        snprintf(debug_str, sizeof(debug_str), "Device not initialized\n");
-        debugpeintf(debug_str);
         return ESP_ERR_INVALID_STATE;
     }
     
     ESP_LOGI(TAG, "Starting PMW3901 sensor initialization...");
-    debugpeintf("Starting PMW3901 sensor initialization...\n");
     
     // Give sensor some time to fully power up before SPI communication
     vTaskDelay(pdMS_TO_TICKS(50));
@@ -263,8 +237,6 @@ esp_err_t pmw3901_begin(void)
     esp_err_t ret = pmw3901_write_reg(PMW3901_POWER_UP_RESET, PMW3901_POWER_UP_RESET_VAL);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to send power-up reset");
-        snprintf(debug_str, sizeof(debug_str), "Failed to send power-up reset\n");
-        debugpeintf(debug_str);
         return ret;
     }
     
@@ -272,44 +244,30 @@ esp_err_t pmw3901_begin(void)
     
     // Verify chip ID
     ESP_LOGI(TAG, "Reading and verifying chip ID...");
-    snprintf(debug_str, sizeof(debug_str), "Reading and verifying chip ID...\n");
-    debugpeintf(debug_str);
     uint8_t chip_id = 0;
     ret = pmw3901_read_reg(PMW3901_PRODUCT_ID, &chip_id);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to read chip ID");
-        snprintf(debug_str, sizeof(debug_str), "Failed to read chip ID\n");
-        debugpeintf(debug_str);
         return ret;
     }
     
     ESP_LOGI(TAG, "Read chip ID: 0x%02X (expected 0x%02X)", chip_id, PMW3901_CHIP_ID);
-    snprintf(debug_str, sizeof(debug_str), "Read chip ID: 0x%02X (expected 0x%02X)\n", chip_id, PMW3901_CHIP_ID);
-    debugpeintf(debug_str);
     // Also read the inverse chip ID for complete verification like Python
     uint8_t chip_id_inverse = 0;
     ret = pmw3901_read_reg(0x5F, &chip_id_inverse);
     if (ret == ESP_OK) {
         ESP_LOGI(TAG, "Read inverse chip ID: 0x%02X (expected 0xB6)", chip_id_inverse);
-        snprintf(debug_str, sizeof(debug_str), "Read inverse chip ID: 0x%02X (expected 0xB6)\n", chip_id_inverse);
-        debugpeintf(debug_str);
     } else {
         ESP_LOGE(TAG, "Failed to read inverse chip ID");
-        snprintf(debug_str, sizeof(debug_str), "Failed to read inverse chip ID\n");
-        debugpeintf(debug_str);
     }
     
     if (chip_id != PMW3901_CHIP_ID) {
         ESP_LOGE(TAG, "Invalid chip ID: 0x%02X (expected 0x%02X)", chip_id, PMW3901_CHIP_ID);
         
-        snprintf(debug_str, sizeof(debug_str), "Invalid chip ID: 0x%02X (expected 0x%02X)\n", chip_id, PMW3901_CHIP_ID);
-        debugpeintf(debug_str);
         return ESP_ERR_NOT_FOUND;
     }
     
     ESP_LOGI(TAG, "PMW3901 chip ID verified: 0x%02X", chip_id);
-    snprintf(debug_str, sizeof(debug_str), "PMW3901 chip ID verified: 0x%02X\n", chip_id);
-    debugpeintf(debug_str);
     
     // Read motion registers to clear residual data
     uint8_t dummy;
@@ -327,8 +285,6 @@ esp_err_t pmw3901_begin(void)
         ret = pmw3901_write_reg(init_sequence[i][0], init_sequence[i][1]);
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Failed to write init register 0x%02X", init_sequence[i][0]);
-            snprintf(debug_str, sizeof(debug_str), "Failed to write init register 0x%02X\n", init_sequence[i][0]);
-            debugpeintf(debug_str);
             return ret;
         }
     }
@@ -367,8 +323,6 @@ esp_err_t pmw3901_begin(void)
     if (ret != ESP_OK) return ret;
     
     ESP_LOGI(TAG, "PMW3901 initialization completed successfully");
-    snprintf(debug_str, sizeof(debug_str), "PMW3901 initialization completed successfully\n");
-    debugpeintf(debug_str);
     return ESP_OK;
 }
 
@@ -384,6 +338,8 @@ esp_err_t pmw3901_read_motion_count(int16_t* delta_x, int16_t* delta_y)
     if (ret != ESP_OK) {
         return ret;
     }
+    
+    // 运行在Core 1，不会阻塞WiFi通信，可以连续读取
     
     // Read delta values in exact Python order: 0x04, 0x03, 0x06, 0x05
     uint8_t delta_x_h, delta_x_l, delta_y_h, delta_y_l;
@@ -439,6 +395,5 @@ void pmw3901_deinit(void)
         dev.initialized = false;
         dev.spi = NULL;
         ESP_LOGI(TAG, "PMW3901 deinitialized");
-        debugpeintf("PMW3901 deinitialized\n");
     }
 }
