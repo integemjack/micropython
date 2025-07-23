@@ -56,13 +56,13 @@ void readOptionalSensors(void)
     }
     
     // 安全读取TOF传感器数据
-    if (tofSensorIsPresent()) {
-        tofAvailable = tofSensorReadMeasurement(&tofData);
-        if (!tofAvailable) {
-            // 如果读取失败，清零数据
-            memset(&tofData, 0, sizeof(tofData));
-        }
-    }
+    // if (tofSensorIsPresent()) {
+    //     tofAvailable = tofSensorReadMeasurement(&tofData);
+    //     if (!tofAvailable) {
+    //         // 如果读取失败，清零数据
+    //         memset(&tofData, 0, sizeof(tofData));
+    //     }
+    // }
 }
 
 TaskHandle_t stabilizerHandle = NULL;
@@ -127,31 +127,57 @@ void setFastAdjustPosParam(uint16_t velTimes, uint16_t absTimes, float height)
 
 static void fastAdjustPosZ(void)
 {	
-	if(velModeTimes > 0)
-	{
-		velModeTimes--;
-		estRstHeight();	/*复位估测高度*/
-		
-		float baroVel = (sensorData.baro.asl - baroLast) / 0.004f;	/*250Hz*/
-		baroLast = sensorData.baro.asl;
-		baroVelLpf += (baroVel - baroVelLpf) * 0.35f;
 
+	if (tofSensorIsPresent()) {
+        tofAvailable = tofSensorReadMeasurement(&tofData);
+        if (!tofAvailable) {
+            // 如果读取失败，清零数据
+            memset(&tofData, 0, sizeof(tofData));
+        }
+
+        // 如果TOF传感器可用，使用TOF数据进行高度控制
+        if (tofAvailable && tofData.distance > 0.0f) {
+            // 将TOF距离转换为mm到cm单位 (TOF返回mm，setHeight使用cm)
+            float tofHeightCm = tofData.distance / 10.0f;
+            
+            // 添加合理性检查：TOF有效范围通常是4cm-400cm
+            // if (tofHeightCm >= 4.0f && tofHeightCm <= 400.0f) {
+                // 使用TOF测量的实际高度更新状态估计
+            state.position.z = tofHeightCm;
+            // }
+        }
+		// TOF数据无效时，使用默认设置
 		setpoint.mode.z = modeVelocity;
-		state.velocity.z = baroVelLpf;		/*气压计融合*/
-		setpoint.velocity.z = -1.0f * baroVelLpf;
-		
-		if(velModeTimes == 0)
-		{
-			setHeight = state.position.z;
-		}		
-	}
-	else if(absModeTimes > 0)
-	{
-		absModeTimes--;
-		estRstAll();	/*复位估测*/
-		setpoint.mode.z = modeAbs;		
 		setpoint.position.z = setHeight;
-	}	
+		setpoint.velocity.z = 0.0f;
+    } else {
+
+		if(velModeTimes > 0)
+		{
+			velModeTimes--;
+			estRstHeight();	/*复位估测高度*/
+			
+			float baroVel = (sensorData.baro.asl - baroLast) / 0.004f;	/*250Hz*/
+			baroLast = sensorData.baro.asl;
+			baroVelLpf += (baroVel - baroVelLpf) * 0.35f;
+
+			setpoint.mode.z = modeVelocity;
+			state.velocity.z = baroVelLpf;		/*气压计融合*/
+			setpoint.velocity.z = -1.0f * baroVelLpf;
+			
+			if(velModeTimes == 0)
+			{
+				setHeight = state.position.z;
+			}		
+		}
+		else if(absModeTimes > 0)
+		{
+			absModeTimes--;
+			estRstAll();	/*复位估测*/
+			setpoint.mode.z = modeAbs;		
+			setpoint.position.z = setHeight;
+		}	
+	}
 }
 
 void stabilizerTask(void* param)
