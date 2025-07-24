@@ -40,36 +40,32 @@ static tofMeasurement_t tofData;
 static bool flowAvailable = false;
 static bool tofAvailable = false;
 
-void readOptionalSensors(void)
+void readOpticalFlowSensor(void)
 {
     // 重置可用性标志
-    flowAvailable = false;
-    tofAvailable = false;
+    // flowAvailable = false;
+    // tofAvailable = false;
     
     // 安全读取光流传感器数据
     if (opticalFlowIsPresent()) {
         flowAvailable = opticalFlowReadMeasurement(&flowData);
-        if (!flowAvailable) {
-            // 如果读取失败，清零数据
-            memset(&flowData, 0, sizeof(flowData));
-        }
+        // if (!flowAvailable) {
+        //     // 如果读取失败，清零数据
+        //     memset(&flowData, 0, sizeof(flowData));
+        // }
     }
-    
-    // 安全读取TOF传感器数据
-    // if (tofSensorIsPresent()) {
-    //     tofAvailable = tofSensorReadMeasurement(&tofData);
-    //     if (!tofAvailable) {
-    //         // 如果读取失败，清零数据
-    //         memset(&tofData, 0, sizeof(tofData));
-    //     }
-    // }
+}
+
+void readTofSensor(void)
+{
+    if (tofSensorIsPresent()) {
+        tofAvailable = tofSensorReadMeasurement(&tofData);
+    }
 }
 
 TaskHandle_t stabilizerHandle = NULL;
-TaskHandle_t readOptionalSensorsHandle = NULL;
 
 void stabilizerTask(void* param);
-void opticalflowTask(void* param);
 
 void stabilizerInit(void)
 {
@@ -91,10 +87,6 @@ void stabilizerDeInit(void)
 	if( stabilizerHandle != NULL )
 	{
 		vTaskDelete( stabilizerHandle );
-	}
-	if( readOptionalSensorsHandle != NULL )
-	{
-		vTaskDelete( readOptionalSensorsHandle );
 	}
 	isInit = false;
 }
@@ -128,56 +120,47 @@ void setFastAdjustPosParam(uint16_t velTimes, uint16_t absTimes, float height)
 static void fastAdjustPosZ(void)
 {	
 
-	if (tofSensorIsPresent()) {
-        tofAvailable = tofSensorReadMeasurement(&tofData);
-        if (!tofAvailable) {
-            // 如果读取失败，清零数据
-            memset(&tofData, 0, sizeof(tofData));
-        }
-
-        // 如果TOF传感器可用，使用TOF数据进行高度控制
-        if (tofAvailable && tofData.distance > 0.0f) {
-            // 将TOF距离转换为mm到cm单位 (TOF返回mm，setHeight使用cm)
-            float tofHeightCm = tofData.distance / 10.0f;
-            
-            // 添加合理性检查：TOF有效范围通常是4cm-400cm
-            // if (tofHeightCm >= 4.0f && tofHeightCm <= 400.0f) {
-                // 使用TOF测量的实际高度更新状态估计
-            state.position.z = tofHeightCm;
-            // }
-        }
+	// 如果TOF传感器可用，使用TOF数据进行高度控制
+	if (tofAvailable || tofData.distance > 0.0f)
+	{
+		// 将TOF距离转换为mm到cm单位 (TOF返回mm，setHeight使用cm)
+		float tofHeightCm = tofData.distance / 10.0f;
+		
+		// 添加合理性检查：TOF有效范围通常是4cm-400cm
+		// if (tofHeightCm >= 4.0f && tofHeightCm <= 400.0f) {
+			// 使用TOF测量的实际高度更新状态估计
+		state.position.z = tofHeightCm;
+		// }
 		// TOF数据无效时，使用默认设置
 		setpoint.mode.z = modeVelocity;
 		setpoint.position.z = setHeight;
 		setpoint.velocity.z = 0.0f;
-    } else {
+    }
+	else if(velModeTimes > 0)
+	{
+		velModeTimes--;
+		estRstHeight();	/*复位估测高度*/
+		
+		float baroVel = (sensorData.baro.asl - baroLast) / 0.004f;	/*250Hz*/
+		baroLast = sensorData.baro.asl;
+		baroVelLpf += (baroVel - baroVelLpf) * 0.35f;
 
-		if(velModeTimes > 0)
+		setpoint.mode.z = modeVelocity;
+		state.velocity.z = baroVelLpf;		/*气压计融合*/
+		setpoint.velocity.z = -1.0f * baroVelLpf;
+		
+		if(velModeTimes == 0)
 		{
-			velModeTimes--;
-			estRstHeight();	/*复位估测高度*/
-			
-			float baroVel = (sensorData.baro.asl - baroLast) / 0.004f;	/*250Hz*/
-			baroLast = sensorData.baro.asl;
-			baroVelLpf += (baroVel - baroVelLpf) * 0.35f;
-
-			setpoint.mode.z = modeVelocity;
-			state.velocity.z = baroVelLpf;		/*气压计融合*/
-			setpoint.velocity.z = -1.0f * baroVelLpf;
-			
-			if(velModeTimes == 0)
-			{
-				setHeight = state.position.z;
-			}		
-		}
-		else if(absModeTimes > 0)
-		{
-			absModeTimes--;
-			estRstAll();	/*复位估测*/
-			setpoint.mode.z = modeAbs;		
-			setpoint.position.z = setHeight;
-		}	
+			setHeight = state.position.z;
+		}		
 	}
+	else if(absModeTimes > 0)
+	{
+		absModeTimes--;
+		estRstAll();	/*复位估测*/
+		setpoint.mode.z = modeAbs;		
+		setpoint.position.z = setHeight;
+	}	
 }
 
 void stabilizerTask(void* param)
@@ -224,6 +207,11 @@ void stabilizerTask(void* param)
 		if (RATE_DO_EXECUTE(ATTITUDE_ESTIMAT_RATE, tick))
 		{
 			imuUpdate(sensorData.acc, sensorData.gyro, &state, ATTITUDE_ESTIMAT_DT);
+			readOpticalFlowSensor();
+		}
+		if (RATE_DO_EXECUTE(ATTITUDE_ESTIMAT_RATE / 2, tick))
+		{
+			readTofSensor();
 		}
 		if (RATE_DO_EXECUTE(POSITION_ESTIMAT_RATE, tick))
 		{
@@ -250,24 +238,6 @@ void stabilizerTask(void* param)
 		if (RATE_DO_EXECUTE(RATE_500_HZ, tick))
 		{
 			powerDistribution(&control);
-		}
-
-		if (RATE_DO_EXECUTE(RATE_500_HZ, tick)) {
-			bool rc_active = !getLockStatus(); // getLockStatus() returns true when RC is disconnected
-			if (!rc_active) {
-				readOptionalSensors();
-				// snprintf(debug_str, sizeof(debug_str), "Flow[%s]: %.2f,%.2f TOF: %.2f, control: %.2d, %.2d, %.2d, %.2f\n", 
-				// 	rc_active ? "RC" : "IDLE",
-				// 	flowData.dpixelx, flowData.dpixely, tofData.distance,
-				// 	control.roll, control.pitch, control.yaw, control.thrust);
-				// debugpeintf(debug_str);
-			} else {
-				// snprintf(debug_str, sizeof(debug_str), "Flow[%s]: %.2f,%.2f TOF: %.2f, control: %.2d, %.2d, %.2d, %.2f\n", 
-				// 	rc_active ? "RC" : "IDLE",
-				// 	flowData.dpixelx, flowData.dpixely, tofData.distance,
-				// 	control.roll, control.pitch, control.yaw, control.thrust);
-				// debugpeintf(debug_str);
-			}
 		}
 		tick++;
 	}
@@ -318,4 +288,24 @@ void getStateData(Axis3f* acc, Axis3f* vel, Axis3f* pos)
 	pos->x = 1.0f * state.position.x;
 	pos->y = 1.0f * state.position.y;
 	pos->z = 1.0f * state.position.z;
+}
+
+// 获取缓存的光流数据
+bool getCachedFlowData(flowMeasurement_t* flow)
+{
+	if (flow && flowAvailable) {
+		*flow = flowData;
+		return true;
+	}
+	return false;
+}
+
+// 获取缓存的TOF数据
+bool getCachedTofData(tofMeasurement_t* tof)
+{
+	if (tof && tofAvailable) {
+		*tof = tofData;
+		return true;
+	}
+	return false;
 }

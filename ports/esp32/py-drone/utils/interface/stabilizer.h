@@ -58,4 +58,8 @@ void getControlledQuantiy(control_t* get);
 // 新增：定点飞行控制方法声明
 void stabilizerHoverControl(float targetX, float targetY, float targetHeight, float dt);
 
+// 新增：缓存传感器数据获取方法声明
+bool getCachedFlowData(flowMeasurement_t* flow);
+bool getCachedTofData(tofMeasurement_t* tof);
+
 #endif /* __STABALIZER_H */
