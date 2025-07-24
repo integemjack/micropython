@@ -56,13 +56,13 @@ void readOptionalSensors(void)
     }
     
     // 安全读取TOF传感器数据
-    // if (tofSensorIsPresent()) {
-    //     tofAvailable = tofSensorReadMeasurement(&tofData);
-    //     if (!tofAvailable) {
-    //         // 如果读取失败，清零数据
-    //         memset(&tofData, 0, sizeof(tofData));
-    //     }
-    // }
+    if (tofSensorIsPresent()) {
+        tofAvailable = tofSensorReadMeasurement(&tofData);
+        if (!tofAvailable) {
+            // 如果读取失败，清零数据
+            memset(&tofData, 0, sizeof(tofData));
+        }
+    }
 }
 
 TaskHandle_t stabilizerHandle = NULL;
@@ -71,9 +71,38 @@ TaskHandle_t readOptionalSensorsHandle = NULL;
 void stabilizerTask(void* param);
 void opticalflowTask(void* param);
 
+// 重置所有stabilizer静态变量 - 解决ESP32重启内存持久化问题
+static void resetStabilizerStatics(void)
+{
+	// 重置高度控制相关变量
+	velModeTimes = 0;
+	absModeTimes = 0;
+	setHeight = 0.0f;
+	baroLast = 0.0f;
+	baroVelLpf = 0.0f;
+	
+	// 重置传感器状态
+	flowAvailable = false;
+	tofAvailable = false;
+	
+	// 重置状态结构体
+	memset(&setpoint, 0, sizeof(setpoint));
+	memset(&sensorData, 0, sizeof(sensorData));
+	memset(&state, 0, sizeof(state));
+	memset(&control, 0, sizeof(control));
+	
+	// 重置光流和TOF数据
+	memset(&flowData, 0, sizeof(flowData));
+	memset(&tofData, 0, sizeof(tofData));
+}
+
 void stabilizerInit(void)
 {
 	if(isInit) return;
+	
+	// *** 关键修复：强制重置所有静态变量 ***
+	resetStabilizerStatics();
+	
 	stateControlInit();		/*姿态PID初始化*/
 	hoverControlInit();		/* 悬停控制初始化 */
 	powerDistributionInit();		/*电机初始化*/
@@ -127,31 +156,20 @@ void setFastAdjustPosParam(uint16_t velTimes, uint16_t absTimes, float height)
 
 static void fastAdjustPosZ(void)
 {	
-
-	if (tofSensorIsPresent()) {
-        tofAvailable = tofSensorReadMeasurement(&tofData);
-        if (!tofAvailable) {
-            // 如果读取失败，清零数据
-            memset(&tofData, 0, sizeof(tofData));
-        }
-
-        // 如果TOF传感器可用，使用TOF数据进行高度控制
-        if (tofAvailable && tofData.distance > 0.0f) {
-            // 将TOF距离转换为mm到cm单位 (TOF返回mm，setHeight使用cm)
-            float tofHeightCm = tofData.distance / 10.0f;
-            
-            // 添加合理性检查：TOF有效范围通常是4cm-400cm
-            // if (tofHeightCm >= 4.0f && tofHeightCm <= 400.0f) {
-                // 使用TOF测量的实际高度更新状态估计
-            state.position.z = tofHeightCm;
-            // }
-        }
-		// TOF数据无效时，使用默认设置
+    // 如果TOF传感器可用，使用TOF数据进行高度控制
+	if (tofAvailable) {
+		// 将TOF距离转换为mm到cm单位 (TOF返回mm，setHeight使用cm)
+		float tofHeightCm = tofData.distance / 10.0f;
+		
+		// 添加合理性检查：TOF有效范围通常是4cm-400cm
+		// if (tofHeightCm >= 4.0f && tofHeightCm <= 400.0f) {
+			// 使用TOF测量的实际高度更新状态估计
+		state.position.z = tofHeightCm;
+		// }
 		setpoint.mode.z = modeVelocity;
 		setpoint.position.z = setHeight;
 		setpoint.velocity.z = 0.0f;
     } else {
-
 		if(velModeTimes > 0)
 		{
 			velModeTimes--;
@@ -192,6 +210,12 @@ void stabilizerTask(void* param)
 	{
 		vTaskDelayUntil(&lastWakeTime, MAIN_LOOP_DT);
 	}
+	
+	// 启用悬停控制系统
+	if (opticalFlowIsPresent() && tofSensorIsPresent()) {
+		hoverControlEnable(true);
+		hoverControlSetTarget(0.0f, 0.0f, 30.0f); // 设置默认悬停目标：x=0, y=0, height=30cm
+	}
 
 	if(opticalFlowIsPresent()) {
 		snprintf(debug_str, sizeof(debug_str), "Optical flow sensor present\n");
@@ -220,6 +244,10 @@ void stabilizerTask(void* param)
 		if (RATE_DO_EXECUTE(RATE_500_HZ, tick))
 		{
 			sensorsAcquire(&sensorData, tick);
+		}
+		if (RATE_DO_EXECUTE(RATE_200_HZ, tick))
+		{
+			readOptionalSensors();
 		}
 		if (RATE_DO_EXECUTE(ATTITUDE_ESTIMAT_RATE, tick))
 		{
@@ -255,7 +283,31 @@ void stabilizerTask(void* param)
 		if (RATE_DO_EXECUTE(RATE_500_HZ, tick)) {
 			bool rc_active = !getLockStatus(); // getLockStatus() returns true when RC is disconnected
 			if (!rc_active) {
-				readOptionalSensors();
+				
+				// 光流数据融合进飞行控制实现定点悬停
+				if (flowAvailable && tofAvailable) {
+					// 使用光流和TOF数据进行悬停控制
+					hoverControlUpdate(&flowData, &tofData, &setpoint, &state, 0.002f); // 500Hz = 2ms
+					
+					// 如果悬停控制激活，应用位置修正
+					if (hoverControlIsActive()) {
+						// 光流提供的位置变化量转换为速度控制
+						float flowScaleFactor = 0.1f; // 光流像素到实际位移的比例因子
+						
+						// 将光流数据转换为位置变化
+						float deltaX = flowData.dpixelx * flowScaleFactor;  
+						float deltaY = flowData.dpixely * flowScaleFactor;
+						
+						// 应用位置控制到setpoint
+						if (setpoint.mode.x == modeDisable) setpoint.mode.x = modeVelocity;
+						if (setpoint.mode.y == modeDisable) setpoint.mode.y = modeVelocity;
+						
+						// 使用PID控制器进行位置稳定
+						setpoint.velocity.x -= deltaX * 2.0f; // 位置修正增益
+						setpoint.velocity.y -= deltaY * 2.0f; // 位置修正增益
+					}
+				}
+				
 				// snprintf(debug_str, sizeof(debug_str), "Flow[%s]: %.2f,%.2f TOF: %.2f, control: %.2d, %.2d, %.2d, %.2f\n", 
 				// 	rc_active ? "RC" : "IDLE",
 				// 	flowData.dpixelx, flowData.dpixely, tofData.distance,
@@ -318,4 +370,24 @@ void getStateData(Axis3f* acc, Axis3f* vel, Axis3f* pos)
 	pos->x = 1.0f * state.position.x;
 	pos->y = 1.0f * state.position.y;
 	pos->z = 1.0f * state.position.z;
+}
+
+// 获取缓存的光流数据
+bool getCachedFlowData(flowMeasurement_t* flow)
+{
+	if (flow && flowAvailable) {
+		*flow = flowData;
+		return true;
+	}
+	return false;
+}
+
+// 获取缓存的TOF数据
+bool getCachedTofData(tofMeasurement_t* tof)
+{
+	if (tof && tofAvailable) {
+		*tof = tofData;
+		return true;
+	}
+	return false;
 }

@@ -23,33 +23,36 @@ static float maxError = 0.f;		/*最大误差*/
 bool isGravityCalibrated = false;	/*是否校校准完成*/
 static float baseAcc[3] = {0.f,0.f,1.0f};	/*静态加速度*/
 
+// 重力校准状态变量（移到文件级便于重置）
+static uint16_t gravityCalCnt = 0;
+static float gravityAccZMin = 1.5f;
+static float gravityAccZMax = 0.5f;
+static float gravitySumAcc[3] = {0.f};
+
 
 static float invSqrt(float x);	/*快速开平方求倒*/
+// resetGravityCalibration函数声明已移到头文件
 
 static void calBaseAcc(float* acc)	/*计算静态加速度*/
 {
-	static uint16_t cnt = 0;
-	static float accZMin = 1.5;
-	static float accZMax = 0.5;
-	static float sumAcc[3] = {0.f};
-	
+	// 使用文件级变量（便于重置）
 	for(uint8_t i=0; i<3; i++)
-		sumAcc[i] += acc[i];
+		gravitySumAcc[i] += acc[i];
 		
-	if(acc[2] < accZMin)	accZMin = acc[2];
-	if(acc[2] > accZMax)	accZMax = acc[2];
+	if(acc[2] < gravityAccZMin)	gravityAccZMin = acc[2];
+	if(acc[2] > gravityAccZMax)	gravityAccZMax = acc[2];
 	
-	if(++cnt >= ACCZ_SAMPLE) /*缓冲区满*/
+	if(++gravityCalCnt >= ACCZ_SAMPLE) /*缓冲区满*/
 	{
-		cnt = 0;
-		maxError = accZMax - accZMin;
-		accZMin = 1.5;
-		accZMax = 0.5;
+		gravityCalCnt = 0;
+		maxError = gravityAccZMax - gravityAccZMin;
+		gravityAccZMin = 1.5f;
+		gravityAccZMax = 0.5f;
 		
 		if(maxError < 0.015f)
 		{
 			for(uint8_t i=0; i<3; i++)
-				baseAcc[i] = sumAcc[i] / ACCZ_SAMPLE;
+				baseAcc[i] = gravitySumAcc[i] / ACCZ_SAMPLE;
 			
 			isGravityCalibrated = true;
 			
@@ -57,8 +60,38 @@ static void calBaseAcc(float* acc)	/*计算静态加速度*/
 		}
 		
 		for(uint8_t i=0; i<3; i++)		
-			sumAcc[i] = 0.f;		
+			gravitySumAcc[i] = 0.f;		
 	}	
+}
+
+// 重置重力校准状态和IMU融合状态
+void resetGravityCalibration(void)
+{
+	// 1. 重置重力校准状态
+	isGravityCalibrated = false;
+	gravityCalCnt = 0;
+	gravityAccZMin = 1.5f;
+	gravityAccZMax = 0.5f;
+	maxError = 0.f;
+	
+	// 2. 重置重力校准累积变量
+	for(uint8_t i=0; i<3; i++) {
+		gravitySumAcc[i] = 0.f;
+		baseAcc[i] = (i == 2) ? 1.0f : 0.f; // 重置为默认值 [0,0,1]
+	}
+	
+	// 3. *** 关键修复：重置四元数到初始状态 ***
+	q0 = 1.0f;  // 单位四元数
+	q1 = 0.0f;
+	q2 = 0.0f;
+	q3 = 0.0f;
+	
+	// 4. 重置旋转矩阵到单位矩阵
+	for(int i=0; i<3; i++) {
+		for(int j=0; j<3; j++) {
+			rMat[i][j] = (i == j) ? 1.0f : 0.0f;
+		}
+	}
 }
 
 /*计算旋转矩阵*/

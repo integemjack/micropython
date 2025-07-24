@@ -55,6 +55,10 @@ void getStateData(Axis3f* acc, Axis3f* vel, Axis3f* pos);
 void setFastAdjustPosParam(uint16_t velTimes, uint16_t absTimes, float height);/*设置快速调整位置参数*/
 void getControlledQuantiy(control_t* get);
 
+// 获取缓存的光流和TOF数据
+bool getCachedFlowData(flowMeasurement_t* flow);
+bool getCachedTofData(tofMeasurement_t* tof);
+
 // 新增：定点飞行控制方法声明
 void stabilizerHoverControl(float targetX, float targetY, float targetHeight, float dt);
 

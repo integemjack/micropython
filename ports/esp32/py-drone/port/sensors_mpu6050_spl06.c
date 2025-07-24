@@ -115,6 +115,15 @@ static bool isInit = false;
 static bool isBarometerPresent = false;
 static bool isMagnetometerPresent = false;
 static uint8_t isprintf = 1;
+
+// 陀螺仪校准重置函数声明
+static void resetGyroBiasNoBuffer(void);
+
+// 轻量级校准算法的全局状态变量（便于重置）
+static uint32_t gyroBiasSampleCount = 0;
+static bool gyroBiasNoBuffFound = false;
+static Axis3i64 gyroBiasSampleSum;
+static Axis3i64 gyroBiasSampleSumSquares;
 typedef struct {
     Axis3f bias;
     Axis3f variance;//
@@ -544,10 +553,7 @@ static bool sensorsFindBiasValue(BiasObj *bias)
  */
 static bool processGyroBiasNoBuffer(int16_t gx, int16_t gy, int16_t gz, Axis3f *gyroBiasOut)
 {
-    static uint32_t gyroBiasSampleCount = 0;
-    static bool gyroBiasNoBuffFound = false;
-    static Axis3i64 gyroBiasSampleSum;
-    static Axis3i64 gyroBiasSampleSumSquares;
+    // 使用文件级的全局变量（便于重置）
 
     if (!gyroBiasNoBuffFound) {
         // If the gyro has not yet been calibrated:
@@ -578,6 +584,27 @@ static bool processGyroBiasNoBuffer(int16_t gx, int16_t gy, int16_t gz, Axis3f *
     }
 
     return gyroBiasNoBuffFound;
+}
+
+// 重置陀螺仪校准状态的函数 - 强制运行时初始化
+static void resetGyroBiasNoBuffer(void)
+{
+    // 强制重置所有静态变量，不依赖编译时初始值
+    gyroBiasSampleCount = 0;
+    gyroBiasNoBuffFound = false;
+    
+    // 显式清零所有内存，确保ESP32重启时的状态一致性
+    gyroBiasSampleSum.x = 0;
+    gyroBiasSampleSum.y = 0; 
+    gyroBiasSampleSum.z = 0;
+    gyroBiasSampleSumSquares.x = 0;
+    gyroBiasSampleSumSquares.y = 0;
+    gyroBiasSampleSumSquares.z = 0;
+    
+    // 重置bias值到安全默认值
+    gyroBias.x = 0.0f;
+    gyroBias.y = 0.0f;
+    gyroBias.z = 0.0f;
 }
 #else
 /**
@@ -863,7 +890,22 @@ static void sensorsTaskInit(void)
 /*传感器数据校准*/
 bool sensorsAreCalibrated(void)	
 {
-	return gyroBiasFound;
+    // 增强校准验证：不仅检查是否找到bias，还要验证bias的合理性
+    if (!gyroBiasFound) {
+        return false;
+    }
+    
+    // 检查bias值是否在合理范围内 (一般小于50°/s的原始值)
+    float maxBias = 50.0f / SENSORS_DEG_PER_LSB_CFG; // 转换为原始LSB值
+    if (fabsf(gyroBias.x) > maxBias || 
+        fabsf(gyroBias.y) > maxBias || 
+        fabsf(gyroBias.z) > maxBias) {
+        // 如果bias值过大，重新校准
+        gyroBiasFound = false;
+        return false;
+    }
+    
+    return true;
 }
 
 //传感器测试
@@ -924,7 +966,30 @@ void sensorsMpu6050Spl06Init(void)
         return;
     }
 
+    // *** 强制硬重置所有校准状态 - 解决ESP32内存持久化问题 ***
+    
+    // 1. 重置所有全局校准标志
+    gyroBiasFound = false;
+    isInit = false;  // 临时重置，强制完全重新初始化
+    
+    // 2. 重置重力校准（IMU融合相关）
+    resetGravityCalibration();
+    
+    // 3. 重置陀螺仪校准状态（根据编译配置）
+#ifdef GYRO_BIAS_LIGHT_WEIGHT
+    resetGyroBiasNoBuffer();
+#else
     sensorsBiasObjInit(&gyroBiasRunning);
+    memset(&gyroBiasRunning, 0, sizeof(gyroBiasRunning));  // 强制清零
+    gyroBiasRunning.isBiasValueFound = false;
+#endif
+    
+    // 4. 重置传感器数据缓存
+    memset(&sensorData, 0, sizeof(sensorData));
+    
+    // 5. 恢复isInit状态
+    isInit = true;
+    
     sensorsDeviceInit();  //mpu初始化
 	
 	//sensorsMpu6050Test();////

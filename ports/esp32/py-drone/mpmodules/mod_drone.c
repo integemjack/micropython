@@ -41,6 +41,8 @@
 #include "sensors_mpu6050_spl06.h"
 // 新增：引入 hover_control.h 头文件
 #include "hover_control.h"
+#include "optical_flow.h"
+#include "vl53lxx.h"
 
 static bool isOffse = 0;
 static ctrlVal_t wifiCtrl;
@@ -193,13 +195,14 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_KW(drone_control_obj, 1, drone_control);
 
 STATIC mp_obj_t read_states(mp_obj_t self_in)
 {
-	mp_obj_t tuple[9];
+	mp_obj_t tuple[13];  // 扩展到13个元素
 	
 	attitude_t attitude;
 	getAttitudeData(&attitude);
 	uint16_t bat = (uint16_t)(pmMeasureExtBatteryVoltage()*100.0f);
 	int32_t FusedHeight =(int32_t) (getFusedHeight());
 
+	// 原有的9个数据 (保持兼容性)
 	tuple[0] = mp_obj_new_int(attitude.roll*100); 
 	tuple[1] = mp_obj_new_int(attitude.pitch*100);
 	tuple[2] = mp_obj_new_int(attitude.yaw*100);
@@ -210,7 +213,35 @@ STATIC mp_obj_t read_states(mp_obj_t self_in)
 	tuple[7] = mp_obj_new_int(bat);
 	tuple[8] = mp_obj_new_int(FusedHeight);
 	
-	return mp_obj_new_tuple(9, tuple);
+	// 新增光流数据 (index 9-10) - 使用缓存数据
+	flowMeasurement_t cachedFlowData;
+	bool flowAvailable = getCachedFlowData(&cachedFlowData);
+	
+	if (flowAvailable) {
+		tuple[9] = mp_obj_new_int((int32_t)(cachedFlowData.dpixelx * 100));  // 光流X方向像素变化 (放大100倍)
+		tuple[10] = mp_obj_new_int((int32_t)(cachedFlowData.dpixely * 100)); // 光流Y方向像素变化 (放大100倍)
+	} else {
+		tuple[9] = mp_obj_new_int(0);   // 光流X无效时返回0
+		tuple[10] = mp_obj_new_int(0);  // 光流Y无效时返回0
+	}
+	
+	// 新增TOF数据 (index 11) - 使用缓存数据
+	tofMeasurement_t cachedTofData;
+	bool tofAvailable = getCachedTofData(&cachedTofData);
+	
+	if (tofAvailable) {
+		tuple[11] = mp_obj_new_int((int32_t)(cachedTofData.distance / 10.0f * 100)); // TOF距离 (mm转0.01cm精度)
+	} else {
+		tuple[11] = mp_obj_new_int(0);  // TOF无效时返回0
+	}
+	
+	// 传感器状态标志 (index 12)
+	int sensor_status = 0;
+	if (flowAvailable) sensor_status |= 0x01;  // bit 0: 光流有效
+	if (tofAvailable) sensor_status |= 0x02;   // bit 1: TOF有效
+	tuple[12] = mp_obj_new_int(sensor_status);
+	
+	return mp_obj_new_tuple(13, tuple);
 }STATIC MP_DEFINE_CONST_FUN_OBJ_1(read_states_obj, read_states);
 
 //----------------------------------------------------------------------------------
