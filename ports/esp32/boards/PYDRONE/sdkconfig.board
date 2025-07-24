@@ -127,4 +127,3 @@ CONFIG_SPIRAM_USE_MEMMAP=y ###########default
 #CONFIG_LOG_TIMESTAMP_SOURCE_RTOS=y
 
 # end of Log output
-
