@@ -62,4 +62,7 @@ void stabilizerHoverControl(float targetX, float targetY, float targetHeight, fl
 bool getCachedFlowData(flowMeasurement_t* flow);
 bool getCachedTofData(tofMeasurement_t* tof);
 
+// 新增：获取目标设定高度
+float getSetHeight(void);
+
 #endif /* __STABALIZER_H */

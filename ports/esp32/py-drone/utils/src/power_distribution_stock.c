@@ -81,16 +81,29 @@ void powerStop()
 
 void powerDistribution(const control_t *control)
 {
+  // 安全检查：防止空指针
+  if (!control) {
+    powerStop();
+    return;
+  }
 
   #ifdef QUAD_FORMATION_X
-    int16_t r = control->roll / 2.0f;
-    int16_t p = control->pitch / 2.0f;
+    // X型四旋翼混控算法修复版本
+    // 使用浮点运算保持精度，然后转换为整数
+    float r = control->roll / 100 / 2.0f;
+    float p = control->pitch / 100 / 2.0f;
+    float y = control->yaw / 100;
+    float t = control->thrust;
 
-	 motorPower.m1 = limitThrust(control->thrust - r - p  + control->yaw);
-     motorPower.m3 =  limitThrust(control->thrust + r + p + control->yaw);
-	
-	 motorPower.m2 = limitThrust(control->thrust - r + p - control->yaw);
-     motorPower.m4 =  limitThrust(control->thrust + r - p - control->yaw);
+    // X型四旋翼标准混控算法：
+    // M1(前右): thrust - roll - pitch + yaw
+    // M2(后左): thrust - roll + pitch - yaw  
+    // M3(后右): thrust + roll + pitch + yaw
+    // M4(前左): thrust + roll - pitch - yaw
+    motorPower.m1 = limitThrust((int16_t)(t - r - p + y));
+    motorPower.m2 = limitThrust((int16_t)(t - r + p - y));
+    motorPower.m3 = limitThrust((int16_t)(t + r + p + y));
+    motorPower.m4 = limitThrust((int16_t)(t + r - p - y));
   #else // QUAD_FORMATION_NORMAL
     motorPower.m1 = limitThrust(control->thrust + control->pitch +control->yaw);
     motorPower.m2 = limitThrust(control->thrust - control->roll -control->yaw);
@@ -120,10 +133,16 @@ void powerDistribution(const control_t *control)
       motorPower.m4 = idleThrust;
     }
 
-    motorsSetRatio(MOTOR_M1, motorPower.m1);
-    motorsSetRatio(MOTOR_M2, motorPower.m2);
-    motorsSetRatio(MOTOR_M3, motorPower.m3);
-    motorsSetRatio(MOTOR_M4, motorPower.m4);
+    // 额外安全检查：确保电机功率不为负值或异常值
+    uint16_t m1Power = (motorPower.m1 < 0) ? 0 : motorPower.m1;
+    uint16_t m2Power = (motorPower.m2 < 0) ? 0 : motorPower.m2;
+    uint16_t m3Power = (motorPower.m3 < 0) ? 0 : motorPower.m3;
+    uint16_t m4Power = (motorPower.m4 < 0) ? 0 : motorPower.m4;
+
+    motorsSetRatio(MOTOR_M1, m1Power);
+    motorsSetRatio(MOTOR_M2, m2Power);
+    motorsSetRatio(MOTOR_M3, m3Power);
+    motorsSetRatio(MOTOR_M4, m4Power);
   }
   
 }
@@ -131,5 +150,51 @@ void powerDistribution(const control_t *control)
 void getMotorPWM(motorPower_t* get)
 {
 	*get = motorPower;
+}
+
+// 测试函数：验证X型四旋翼混控算法
+void testQuadMixing(void)
+{
+  printf("=== X型四旋翼混控算法测试 ===\n");
+  
+  control_t testControl;
+  
+  // 测试1：纯推力
+  testControl.thrust = 10000;
+  testControl.roll = 0;
+  testControl.pitch = 0;
+  testControl.yaw = 0;
+  powerDistribution(&testControl);
+  printf("纯推力测试: M1=%d M2=%d M3=%d M4=%d\n", 
+         motorPower.m1, motorPower.m2, motorPower.m3, motorPower.m4);
+  
+  // 测试2：Roll控制（向右滚转）
+  testControl.thrust = 10000;
+  testControl.roll = 1000;
+  testControl.pitch = 0;
+  testControl.yaw = 0;
+  powerDistribution(&testControl);
+  printf("Roll右滚测试: M1=%d M2=%d M3=%d M4=%d\n", 
+         motorPower.m1, motorPower.m2, motorPower.m3, motorPower.m4);
+  
+  // 测试3：Pitch控制（向前俯仰）
+  testControl.thrust = 10000;
+  testControl.roll = 0;
+  testControl.pitch = 1000;
+  testControl.yaw = 0;
+  powerDistribution(&testControl);
+  printf("Pitch前俯测试: M1=%d M2=%d M3=%d M4=%d\n", 
+         motorPower.m1, motorPower.m2, motorPower.m3, motorPower.m4);
+  
+  // 测试4：Yaw控制（右转）
+  testControl.thrust = 10000;
+  testControl.roll = 0;
+  testControl.pitch = 0;
+  testControl.yaw = 1000;
+  powerDistribution(&testControl);
+  printf("Yaw右转测试: M1=%d M2=%d M3=%d M4=%d\n", 
+         motorPower.m1, motorPower.m2, motorPower.m3, motorPower.m4);
+  
+  printf("=== 测试完成 ===\n");
 }
 

@@ -121,22 +121,42 @@ static void fastAdjustPosZ(void)
 {	
 
 	// 如果TOF传感器可用，使用TOF数据进行高度控制
-	if (tofAvailable || tofData.distance > 0.0f)
-	{
-		// 将TOF距离转换为mm到cm单位 (TOF返回mm，setHeight使用cm)
-		float tofHeightCm = tofData.distance / 10.0f;
+	// if (tofAvailable && tofData.distance > 0.0f)
+	// {
+	// 	// 将TOF距离转换为mm到cm单位 (TOF返回mm，setHeight使用cm)
+	// 	float tofHeightCm = tofData.distance / 100.0f;
 		
-		// 添加合理性检查：TOF有效范围通常是4cm-400cm
-		// if (tofHeightCm >= 4.0f && tofHeightCm <= 400.0f) {
-			// 使用TOF测量的实际高度更新状态估计
-		state.position.z = tofHeightCm;
-		// }
-		// TOF数据无效时，使用默认设置
-		setpoint.mode.z = modeVelocity;
-		setpoint.position.z = setHeight;
-		setpoint.velocity.z = 0.0f;
-    }
-	else if(velModeTimes > 0)
+	// 	// 添加合理性检查：TOF有效范围通常是4cm-400cm
+	// 	if (tofHeightCm >= 0.1f && tofHeightCm <= 400.0f) {
+	// 		// 使用TOF测量的实际高度更新状态估计（添加滤波避免突变）
+	// 		static float filteredHeight = 0.0f;
+	// 		static bool heightInitialized = false;
+			
+	// 		// 第一次初始化滤波器
+	// 		// if (!heightInitialized) {
+	// 		// 	filteredHeight = tofHeightCm;
+	// 		// 	heightInitialized = true;
+	// 		// } else {
+	// 		// 	// 低通滤波避免噪声和突变
+	// 		// 	float alpha = 0.1f;  // 滤波系数，值越小越平滑
+	// 		// 	filteredHeight = alpha * tofHeightCm + (1.0f - alpha) * filteredHeight;
+	// 		// }
+			
+	// 		state.position.z = tofHeightCm;
+			
+	// 		// 设置为位置绝对模式（不是速度模式）
+	// 		setpoint.mode.z = modeAbs;          // 位置绝对控制模式
+	// 		setpoint.position.z = setHeight;    // 目标高度位置
+	// 		setpoint.velocity.z = 0.0f;         // 目标速度为0（悬停）
+	// 	} else {
+	// 		// TOF数据超出有效范围，使用默认高度控制
+	// 		setpoint.mode.z = modeAbs;
+	// 		setpoint.position.z = setHeight;
+	// 		setpoint.velocity.z = 0.0f;
+	// 	}
+    // }
+	// else 
+	if(velModeTimes > 0)
 	{
 		velModeTimes--;
 		estRstHeight();	/*复位估测高度*/
@@ -308,4 +328,10 @@ bool getCachedTofData(tofMeasurement_t* tof)
 		return true;
 	}
 	return false;
+}
+
+// 获取目标设定高度
+float getSetHeight(void)
+{
+	return setHeight;
 }

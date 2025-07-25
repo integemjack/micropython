@@ -39,8 +39,9 @@
 #include "pm_esplane.h"
 #include "ledseq.h"
 #include "sensors_mpu6050_spl06.h"
-// 新增：引入 hover_control.h 头文件
-#include "hover_control.h"
+
+// 新增：引入 power_distribution.h 头文件，用于获取电机功率数据
+#include "power_distribution.h"
 
 static bool isOffse = 0;
 static ctrlVal_t wifiCtrl;
@@ -193,7 +194,7 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_KW(drone_control_obj, 1, drone_control);
 
 STATIC mp_obj_t read_states(mp_obj_t self_in)
 {
-	mp_obj_t tuple[13];  // 扩展到13个元素
+	mp_obj_t tuple[18];  // 扩展到18个元素：原13个 + 4个电机功率 + 1个目标高度
 	
 	attitude_t attitude;
 	getAttitudeData(&attitude);
@@ -201,15 +202,15 @@ STATIC mp_obj_t read_states(mp_obj_t self_in)
 	int32_t FusedHeight =(int32_t) (getFusedHeight());
 
 	// 原有的9个数据 (保持兼容性)
-	tuple[0] = mp_obj_new_int(attitude.roll*100); 
-	tuple[1] = mp_obj_new_int(attitude.pitch*100);
-	tuple[2] = mp_obj_new_int(attitude.yaw*100);
-	tuple[3] = mp_obj_new_int(wifiCtrl.roll*100);
-	tuple[4] = mp_obj_new_int(wifiCtrl.pitch*100);
-	tuple[5] = mp_obj_new_int(wifiCtrl.yaw*100);
-	tuple[6] = mp_obj_new_int(((wifiCtrl.thrust/655.35)+0.5));
-	tuple[7] = mp_obj_new_int(bat);
-	tuple[8] = mp_obj_new_int(FusedHeight);
+	tuple[0] = mp_obj_new_int(attitude.roll*100);     // 姿态角Roll (放大100倍)
+	tuple[1] = mp_obj_new_int(attitude.pitch*100);    // 姿态角Pitch (放大100倍)
+	tuple[2] = mp_obj_new_int(attitude.yaw*100);      // 姿态角Yaw (放大100倍)
+	tuple[3] = mp_obj_new_int(wifiCtrl.roll*100);     // 控制输入Roll (放大100倍)
+	tuple[4] = mp_obj_new_int(wifiCtrl.pitch*100);    // 控制输入Pitch (放大100倍)
+	tuple[5] = mp_obj_new_int(wifiCtrl.yaw*100);      // 控制输入Yaw (放大100倍)
+	tuple[6] = mp_obj_new_int(((wifiCtrl.thrust/655.35)+0.5)); // 推力输入值
+	tuple[7] = mp_obj_new_int(bat);                   // 电池电压 (放大100倍)
+	tuple[8] = mp_obj_new_int(FusedHeight);           // 融合高度值
 	
 	// 新增光流数据 (index 9-10) - 使用缓存数据
 	flowMeasurement_t cachedFlowData;
@@ -228,19 +229,50 @@ STATIC mp_obj_t read_states(mp_obj_t self_in)
 	bool tofAvailable = getCachedTofData(&cachedTofData);
 	
 	if (tofAvailable) {
-		tuple[11] = mp_obj_new_int((int32_t)(cachedTofData.distance / 10.0f * 100)); // TOF距离 (mm转0.01cm精度)
+		tuple[11] = mp_obj_new_int((int32_t)(cachedTofData.distance)); // TOF距离 (mm精度，与setHeight一致)
 	} else {
 		tuple[11] = mp_obj_new_int(0);  // TOF无效时返回0
 	}
-	
+
 	// 传感器状态标志 (index 12)
 	int sensor_status = 0;
 	if (flowAvailable) sensor_status |= 0x01;  // bit 0: 光流有效
 	if (tofAvailable) sensor_status |= 0x02;   // bit 1: TOF有效
 	tuple[12] = mp_obj_new_int(sensor_status);
 	
-	return mp_obj_new_tuple(13, tuple);
+	// 新增电机功率数据 (index 13-16)
+	motorPower_t motorPower;
+	getMotorPWM(&motorPower);  // 获取当前电机功率
+	
+	tuple[13] = mp_obj_new_int(motorPower.m1);  // M1电机功率
+	tuple[14] = mp_obj_new_int(motorPower.m2);  // M2电机功率  
+	tuple[15] = mp_obj_new_int(motorPower.m3);  // M3电机功率
+	tuple[16] = mp_obj_new_int(motorPower.m4);  // M4电机功率
+	
+	// 新增目标设定高度 (index 17)
+	float targetHeight = getSetHeight();
+	tuple[17] = mp_obj_new_int((int32_t)(targetHeight * 10));  // 目标高度 (cm转mm精度)
+	
+	return mp_obj_new_tuple(18, tuple);
 }STATIC MP_DEFINE_CONST_FUN_OBJ_1(read_states_obj, read_states);
+
+//==============================================================================================================
+// 新增：读取电机功率的专用函数（用于调试M1、M3停转问题）
+STATIC mp_obj_t read_motor_power(mp_obj_t self_in)
+{
+	mp_obj_t tuple[4];
+	motorPower_t motorPower;
+	
+	getMotorPWM(&motorPower);  // 获取当前电机功率
+	
+	tuple[0] = mp_obj_new_int(motorPower.m1);  // M1电机功率
+	tuple[1] = mp_obj_new_int(motorPower.m2);  // M2电机功率  
+	tuple[2] = mp_obj_new_int(motorPower.m3);  // M3电机功率
+	tuple[3] = mp_obj_new_int(motorPower.m4);  // M4电机功率
+	
+	return mp_obj_new_tuple(4, tuple);
+}
+STATIC MP_DEFINE_CONST_FUN_OBJ_1(read_motor_power_obj, read_motor_power);
 
 //----------------------------------------------------------------------------------
 STATIC mp_obj_t read_accelerometer(mp_obj_t self_in)
@@ -357,37 +389,8 @@ STATIC mp_obj_t drone_make_new(const mp_obj_type_t *type, size_t n_args, size_t 
 	is_init = true;
 	return MP_OBJ_FROM_PTR(drone_type);
 }
-// 新增：micropython接口，调用stabilizerHoverControl
-STATIC mp_obj_t drone_hover_control(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
-    static const mp_arg_t allowed_args[] = {
-        { MP_QSTR_x, MP_ARG_OBJ, {.u_obj = mp_const_none} },
-        { MP_QSTR_y, MP_ARG_OBJ, {.u_obj = mp_const_none} },
-        { MP_QSTR_height, MP_ARG_OBJ, {.u_obj = mp_const_none} },
-        // 修复：不能用 mp_obj_new_float 静态初始化，改为 mp_const_none
-        { MP_QSTR_dt, MP_ARG_OBJ, {.u_obj = mp_const_none} },
-    };
-    mp_arg_val_t args[MP_ARRAY_SIZE(allowed_args)];
-    mp_arg_parse_all(n_args - 1, pos_args + 1, kw_args, MP_ARRAY_SIZE(allowed_args), allowed_args, args);
 
-    float x, y, height;
-    Axis3f acc, vel, pos;
-    getStateData(&acc, &vel, &pos);
-    x = (args[0].u_obj == mp_const_none) ? pos.x : mp_obj_get_float(args[0].u_obj);
-    y = (args[1].u_obj == mp_const_none) ? pos.y : mp_obj_get_float(args[1].u_obj);
-    height = (args[2].u_obj == mp_const_none) ? pos.z : mp_obj_get_float(args[2].u_obj);
-    // 修复：dt 默认值
-    float dt = (args[3].u_obj == mp_const_none) ? 0.01f : mp_obj_get_float(args[3].u_obj);
 
-    // stabilizerHoverControl(x, y, height, dt);
-    return mp_const_none;
-}
-STATIC MP_DEFINE_CONST_FUN_OBJ_KW(drone_hover_control_obj, 1, drone_hover_control);
-
-// 新增：micropython接口，判断是否自动悬停
-STATIC mp_obj_t drone_is_hover_active(mp_obj_t self_in) {
-    return hoverControlIsActive() ? mp_const_true : mp_const_false;
-}
-STATIC MP_DEFINE_CONST_FUN_OBJ_1(drone_is_hover_active_obj, drone_is_hover_active);
 
 /******************************************************************************/
 STATIC const mp_rom_map_elem_t drone_locals_dict_table[] = {
@@ -398,13 +401,14 @@ STATIC const mp_rom_map_elem_t drone_locals_dict_table[] = {
 	{ MP_ROM_QSTR(MP_QSTR_take_off), MP_ROM_PTR(&drone_take_off_obj) },
 	{ MP_ROM_QSTR(MP_QSTR_control), MP_ROM_PTR(&drone_control_obj) },
 	{ MP_ROM_QSTR(MP_QSTR_read_states), MP_ROM_PTR(&read_states_obj) },
+	
 	{ MP_ROM_QSTR(MP_QSTR_trim), MP_ROM_PTR(&drone_trim_obj) },
 	{ MP_ROM_QSTR(MP_QSTR_read_accelerometer), MP_ROM_PTR(&read_accelerometer_obj) },
 	{ MP_ROM_QSTR(MP_QSTR_read_compass), MP_ROM_PTR(&read_compass_obj) },
 	{ MP_ROM_QSTR(MP_QSTR_read_air_pressure), MP_ROM_PTR(&read_air_pressure_obj) },
 	{ MP_ROM_QSTR(MP_QSTR_read_calibrated), MP_ROM_PTR(&read_calibrated_obj) },
 	{ MP_ROM_QSTR(MP_QSTR_read_cal_data), MP_ROM_PTR(&read_cal_data_obj) },
-	{ MP_ROM_QSTR(MP_QSTR_hover_control), MP_ROM_PTR(&drone_hover_control_obj) },
+	
 	{ MP_ROM_QSTR(MP_QSTR_is_hover_active), MP_ROM_PTR(&drone_is_hover_active_obj) },
 };
 STATIC MP_DEFINE_CONST_DICT(drone_drone_locals_dict,drone_locals_dict_table);

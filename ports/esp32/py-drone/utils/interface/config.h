@@ -49,6 +49,11 @@
 //#define DEBUG_UDP
 //#define DEBUG_EP2
 
+// 调试选项：用于诊断M1和M3停转问题
+//#define DEBUG_MOTOR_POWER    // 启用电机功率调试输出
+//#define DEBUG_M1_M3_ISSUE    // 启用M1和M3零功率检测
+//#define DEBUG_THRUST_ISSUE   // 启用推力值调试追踪
+
 // Task priorities. Higher number higher priority
 #define STABILIZER_TASK_PRI     5
 #define SENSORS_TASK_PRI        4

@@ -123,10 +123,30 @@ static void ctrlDataUpdate(void)
 		configParam.trimP = ctrlVal.trimPitch;	/*更新微调值*/
 		configParam.trimR = ctrlVal.trimRoll;
 		
+		// 调试：追踪推力值变化
+		#ifdef DEBUG_THRUST_ISSUE
+		static uint32_t debugCount = 0;
+		if (++debugCount % 50 == 0) {  // 每50次输出一次
+			printf("Thrust debug: raw=%.1f lpf=%.1f min=%d max=%d\n", 
+				   ctrlVal.thrust, ctrlValLpf.thrust, MIN_THRUST, MAX_THRUST);
+		}
+		#endif
+
 		if (ctrlValLpf.thrust < MIN_THRUST)
 			ctrlValLpf.thrust = 0;	
 		else 		
 			ctrlValLpf.thrust = (ctrlValLpf.thrust>=MAX_THRUST) ? MAX_THRUST:ctrlValLpf.thrust;
+
+		// 特别检查推力异常低的情况
+		#ifdef DEBUG_THRUST_ISSUE
+		static uint32_t lowThrustCount = 0;
+		if (ctrlValLpf.thrust < 1000 && ctrlVal.thrust > 10000) {
+			if (++lowThrustCount % 10 == 0) {
+				printf("WARNING: Low thrust! raw=%.1f filtered=%.1f\n", 
+					   ctrlVal.thrust, ctrlValLpf.thrust);
+			}
+		}
+		#endif
 	}
 	
 }
