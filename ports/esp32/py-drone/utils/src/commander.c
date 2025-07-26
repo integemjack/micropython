@@ -271,8 +271,8 @@ void commanderGetSetpoint(setpoint_t *setpoint, state_t *state)
 		}
 		else if(commander.keyFlight)/*一键起飞*/ 
 		{	
-			setpoint->thrust = 0;
-			setpoint->mode.z = modeAbs;		
+			// 使用stabilizer统一高度控制处理一键起飞
+			setTargetHeight(landing_dis);
 			
 			if (initHigh == false)
 			{
@@ -281,9 +281,10 @@ void commanderGetSetpoint(setpoint_t *setpoint, state_t *state)
 				errorPosX = 0.f;
 				errorPosY = 0.f;
 				errorPosZ = 0.f;
-
-				setFastAdjustPosParam(0, 1, landing_dis);	/*一键起飞高度80cm*/			
-			}		
+			}
+			
+			// 每次起飞都更新目标高度，确保take_off(distance)设置的值生效
+			setFastAdjustPosParam(0, 1, landing_dis);		
 				
 			float climb = ((ctrlValLpf.thrust - 32767.f) / 32767.f);
 			if(climb > 0.f) 
@@ -339,8 +340,9 @@ void commanderGetSetpoint(setpoint_t *setpoint, state_t *state)
 	}
 	else /*手动飞模式*/
 	{
-		setpoint->mode.z = modeDisable;
-		setpoint->thrust = ctrlValLpf.thrust;
+		// 使用stabilizer统一高度控制处理手动模式
+		setHeightControlMode(0); // HEIGHT_CTRL_MANUAL = 0
+		setManualThrust(ctrlValLpf.thrust);
 	}	
  	
 	setpoint->attitude.roll = ctrlValLpf.roll;

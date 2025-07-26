@@ -42,6 +42,8 @@
 
 // 新增：引入 power_distribution.h 头文件，用于获取电机功率数据
 #include "power_distribution.h"
+// 新增：引入 hover_control.h 头文件，用于悬停控制
+#include "hover_control.h"
 
 static bool isOffse = 0;
 static ctrlVal_t wifiCtrl;
@@ -132,7 +134,7 @@ STATIC mp_obj_t drone_trim(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw
     mp_arg_parse_all(n_args - 1, pos_args + 1, kw_args, MP_ARRAY_SIZE(drone_take_args), drone_take_args, args);
 	
 	float rol = ((float)args[0].u_int)/100.0f;
-	float pit = ((float)args[0].u_int)/100.0f;
+	float pit = ((float)args[1].u_int)/100.0f;
 
 	wifiCtrl.trimRoll += limit(rol,-10.0, 10.0);
 	wifiCtrl.trimPitch += limit(pit,-10.0, 10.0);
@@ -336,6 +338,12 @@ STATIC mp_obj_t read_cal_data(mp_obj_t self_in)
 }STATIC MP_DEFINE_CONST_FUN_OBJ_1(read_cal_data_obj, read_cal_data);
 
 //----------------------------------------------------------------------------------
+STATIC mp_obj_t drone_is_hover_active(mp_obj_t self_in)
+{
+	return mp_obj_new_bool(hoverControlIsActive());
+}STATIC MP_DEFINE_CONST_FUN_OBJ_1(drone_is_hover_active_obj, drone_is_hover_active);
+
+//----------------------------------------------------------------------------------
 static void InitDrone(void)
 {
 	static uint16_t lastThrust;
@@ -408,6 +416,7 @@ STATIC const mp_rom_map_elem_t drone_locals_dict_table[] = {
 	{ MP_ROM_QSTR(MP_QSTR_read_air_pressure), MP_ROM_PTR(&read_air_pressure_obj) },
 	{ MP_ROM_QSTR(MP_QSTR_read_calibrated), MP_ROM_PTR(&read_calibrated_obj) },
 	{ MP_ROM_QSTR(MP_QSTR_read_cal_data), MP_ROM_PTR(&read_cal_data_obj) },
+	{ MP_ROM_QSTR(MP_QSTR_read_motor_power), MP_ROM_PTR(&read_motor_power_obj) },
 	
 	{ MP_ROM_QSTR(MP_QSTR_is_hover_active), MP_ROM_PTR(&drone_is_hover_active_obj) },
 };

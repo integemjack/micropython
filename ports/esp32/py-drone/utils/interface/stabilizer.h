@@ -65,4 +65,10 @@ bool getCachedTofData(tofMeasurement_t* tof);
 // 新增：获取目标设定高度
 float getSetHeight(void);
 
+// 统一高度控制接口
+void setHeightControlMode(int mode);  // 0=手动, 1=自动, 2=起飞, 3=降落
+void setManualThrust(float thrust);
+void setTargetHeight(float height);
+float getAdaptiveBaseThrust(void);
+
 #endif /* __STABALIZER_H */

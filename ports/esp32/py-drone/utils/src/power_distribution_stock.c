@@ -100,10 +100,16 @@ void powerDistribution(const control_t *control)
     // M2(后左): thrust - roll + pitch - yaw  
     // M3(后右): thrust + roll + pitch + yaw
     // M4(前左): thrust + roll - pitch - yaw
-    motorPower.m1 = limitThrust((int16_t)(t - r - p + y));
-    motorPower.m2 = limitThrust((int16_t)(t - r + p - y));
-    motorPower.m3 = limitThrust((int16_t)(t + r + p + y));
-    motorPower.m4 = limitThrust((int16_t)(t + r - p - y));
+    float m1_calc = t - r - p + y;
+    float m2_calc = t - r + p - y;
+    float m3_calc = t + r + p + y;
+    float m4_calc = t + r - p - y;
+    
+    // 确保所有电机功率都大于基础推力t，防止失去动力
+    motorPower.m1 = limitThrust((int16_t)(m1_calc > t ? m1_calc : t));
+    motorPower.m2 = limitThrust((int16_t)(m2_calc > t ? m2_calc : t));
+    motorPower.m3 = limitThrust((int16_t)(m3_calc > t ? m3_calc : t));
+    motorPower.m4 = limitThrust((int16_t)(m4_calc > t ? m4_calc : t));
   #else // QUAD_FORMATION_NORMAL
     motorPower.m1 = limitThrust(control->thrust + control->pitch +control->yaw);
     motorPower.m2 = limitThrust(control->thrust - control->roll -control->yaw);

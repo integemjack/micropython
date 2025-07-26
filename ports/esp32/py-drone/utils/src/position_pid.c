@@ -5,6 +5,8 @@
 #include "position_pid.h"
 //#include "remoter_ctrl.h"
 #include "maths.h"
+#include "state_estimator.h"
+#include "stabilizer.h"
 
 
 #define THRUST_BASE  		(20000)	/*基础油门值*/
@@ -56,7 +58,10 @@ static void velocityController(float* thrust, attitude_t *attitude, setpoint_t *
 	// Thrust
 	float thrustRaw = pidUpdate(&pidVZ, setpoint->velocity.z - state->velocity.z);
 	
-	*thrust = constrainf(thrustRaw + THRUST_BASE, 1000, 60000);	/*油门限幅*/
+	// 使用stabilizer中统一的自适应基础推力
+	float adaptiveThrust = getAdaptiveBaseThrust();
+	
+	*thrust = constrainf(thrustRaw + adaptiveThrust, 1000, 60000);	/*油门限幅*/
 	
 	thrustLpf += (*thrust - thrustLpf) * 0.003f;
 	

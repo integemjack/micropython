@@ -35,6 +35,18 @@ static float setHeight = 0.f;		/*设定目标高度 单位cm*/
 static float baroLast = 0.f;
 static float baroVelLpf = 0.f;
 
+// 统一高度控制状态
+typedef enum {
+    HEIGHT_CTRL_MANUAL = 0,    // 手动推力控制
+    HEIGHT_CTRL_AUTO,          // 自动高度控制  
+    HEIGHT_CTRL_TAKEOFF,       // 起飞模式
+    HEIGHT_CTRL_LANDING        // 降落模式
+} heightCtrlMode_t;
+
+static heightCtrlMode_t heightMode = HEIGHT_CTRL_MANUAL;
+static float manualThrustInput = 0.0f;
+static float adaptiveBaseThrust = 20000.0f;
+
 static flowMeasurement_t flowData;
 static tofMeasurement_t tofData;
 static bool flowAvailable = false;
@@ -114,7 +126,94 @@ void setFastAdjustPosParam(uint16_t velTimes, uint16_t absTimes, float height)
 	{
 		setHeight = height;
 		absModeTimes = absTimes;
+		// 设置目标高度时自动切换到自动高度控制模式
+		heightMode = HEIGHT_CTRL_AUTO;
 	}		
+}
+
+// 统一高度控制核心函数
+void updateHeightControl(void)
+{
+	float currentHeight = getFusedHeight();
+	
+	// 传感器融合：TOF + 气压计
+	float fusedHeight = currentHeight;
+	if (tofAvailable && tofData.distance > 0) {
+		float tofHeightCm = tofData.distance / 10.0f; // mm to cm
+		// TOF在近距离时权重更高
+		if (tofHeightCm < 200.0f) {
+			float tofWeight = 0.7f - (tofHeightCm / 400.0f) * 0.4f; // 5-200cm: 0.7-0.3权重
+			fusedHeight = currentHeight * (1.0f - tofWeight) + tofHeightCm * tofWeight;
+		}
+	}
+	
+	switch (heightMode) {
+		case HEIGHT_CTRL_MANUAL:
+			// 手动模式：使用遥控器推力，但保持基础推力保护
+			adaptiveBaseThrust = manualThrustInput * 0.3f + 20000.0f;
+			setpoint.mode.z = modeDisable;
+			setpoint.thrust = manualThrustInput;
+			break;
+			
+		case HEIGHT_CTRL_AUTO:
+		case HEIGHT_CTRL_TAKEOFF:
+			// 自动模式：基于高度误差的自适应推力
+			{
+				float heightError = setHeight - fusedHeight;
+				
+				if (fabs(heightError) > 5.0f) {
+					float thrustAdjustment = heightError * 100.0f; // 每cm误差100推力值
+					adaptiveBaseThrust = 20000.0f + constrainf(thrustAdjustment, -8000, 12000);
+					
+					// 接近目标时平滑过渡
+					if (fabs(heightError) < 20.0f) {
+						float smoothFactor = fabs(heightError) / 20.0f;
+						adaptiveBaseThrust = 20000.0f + thrustAdjustment * smoothFactor;
+					}
+				} else {
+					adaptiveBaseThrust = 20000.0f;
+				}
+				
+				setpoint.mode.z = modeAbs;
+				setpoint.position.z = setHeight;
+			}
+			break;
+			
+		case HEIGHT_CTRL_LANDING:
+			// 降落模式：逐渐减小推力
+			adaptiveBaseThrust = 15000.0f + (fusedHeight / setHeight) * 5000.0f;
+			setpoint.mode.z = modeVelocity;
+			setpoint.velocity.z = -50.0f; // 50cm/s下降
+			break;
+	}
+	
+	// 安全限制
+	adaptiveBaseThrust = constrainf(adaptiveBaseThrust, 10000.0f, 50000.0f);
+}
+
+// 外部接口函数
+void setHeightControlMode(int mode) 
+{
+	heightMode = (heightCtrlMode_t)mode;
+}
+
+void setManualThrust(float thrust)
+{
+	manualThrustInput = thrust;
+	if (heightMode == HEIGHT_CTRL_MANUAL) {
+		heightMode = HEIGHT_CTRL_MANUAL; // 确保在手动模式
+	}
+}
+
+void setTargetHeight(float height)
+{
+	setHeight = height;
+	heightMode = HEIGHT_CTRL_AUTO;
+}
+
+float getAdaptiveBaseThrust(void)
+{
+	return adaptiveBaseThrust;
 }
 
 static void fastAdjustPosZ(void)
@@ -241,6 +340,8 @@ void stabilizerTask(void* param)
 		if (RATE_DO_EXECUTE(RATE_100_HZ, tick) && getIsCalibrated()==true)
 		{
 			commanderGetSetpoint(&setpoint, &state);
+			// 统一高度控制更新
+			updateHeightControl();
 		}
 
 		if (RATE_DO_EXECUTE(RATE_250_HZ, tick))
