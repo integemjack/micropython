@@ -21,14 +21,14 @@ static configParam_t configParamDefault=
 		.roll=
 		{
 			.kp=8.0,
-			.ki=0.0,
-			.kd=0.0,
+			.ki=0.08,    /*修复：增加积分项消除Roll轴稳态误差*/
+			.kd=0.12,    /*修复：增加微分项抑制Roll轴振荡*/
 		},
 		.pitch=
 		{
 			.kp=8.0,
-			.ki=0.0,
-			.kd=0.0,
+			.ki=0.05,    /*修复：Pitch轴也增加适当积分项*/
+			.kd=0.08,    /*修复：Pitch轴微分项稍小于Roll轴*/
 		},
 		.yaw=
 		{
@@ -41,14 +41,14 @@ static configParam_t configParamDefault=
 	{	
 		.roll=
 		{
-			.kp=300.0,
-			.ki=0.0,
-			.kd=6.5,
+			.kp=280.0,   /*修复：稍微降低Roll轴P值，避免过激响应*/
+			.ki=3.5,     /*修复：增加积分项消除Roll轴稳态误差*/
+			.kd=8.0,     /*修复：增加微分项提高Roll轴阻尼*/
 		},
 		.pitch=
 		{
 			.kp=300.0,
-			.ki=0.0,
+			.ki=2.5,     /*修复：Pitch轴也增加积分项，但比Roll轴小*/
 			.kd=6.5,
 		},
 		.yaw=
@@ -62,15 +62,15 @@ static configParam_t configParamDefault=
 	{	
 		.vx=
 		{
-			.kp=4.5,
-			.ki=0.0,
-			.kd=0.0,
+			.kp=4.0,     /*修复：降低vx(Roll控制)P值，提高稳定性*/
+			.ki=0.15,    /*修复：增加积分项消除Roll轴位置误差*/
+			.kd=0.25,    /*修复：增加微分项减少Roll轴超调*/
 		},
 		.vy=
 		{
 			.kp=4.5,
-			.ki=0.0,
-			.kd=0.0,
+			.ki=0.10,    /*修复：vy(Pitch控制)也增加积分项*/
+			.kd=0.20,    /*修复：增加微分项*/
 		},
 		.vz=
 		{

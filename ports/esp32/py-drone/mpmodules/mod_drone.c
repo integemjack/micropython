@@ -104,9 +104,17 @@ STATIC mp_obj_t drone_take_off(size_t n_args, const mp_obj_t *pos_args, mp_map_t
     mp_arg_parse_all(n_args - 1, pos_args + 1, kw_args, MP_ARRAY_SIZE(drone_take_args), drone_take_args, args);
 
 	setLandingDis((float)args[0].u_int);
+	char debug_str[64];
+	snprintf(debug_str, sizeof(debug_str), "DEBUG: take_off called with distance=%d cm\n", args[0].u_int);
+	mp_hal_stdout_tx_strn(debug_str, strlen(debug_str));
 
 	if(getCommanderKeyFlight() != true )
 	{
+		// 清除紧急停止状态，允许重新起飞
+		setCommanderEmerStop(false);
+		// 强制启用调试输出
+		setPrintf(1);
+		
 		if(!isOffse){
 			attitude_t attitude;
 			getAttitudeData(&attitude);
@@ -253,6 +261,7 @@ STATIC mp_obj_t read_states(mp_obj_t self_in)
 	
 	// 新增目标设定高度 (index 17)
 	float targetHeight = getSetHeight();
+
 	tuple[17] = mp_obj_new_int((int32_t)(targetHeight * 10));  // 目标高度 (cm转mm精度)
 	
 	return mp_obj_new_tuple(18, tuple);

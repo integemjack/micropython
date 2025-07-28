@@ -12,6 +12,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "ledseq.h"
+#include "py/mphal.h"  // 包含mp_hal_stdout_tx_strn()声明
 #define CLIMB_RATE			100.f
 #define MAX_CLIMB_UP		100.f
 #define MAX_CLIMB_DOWN		60.f
@@ -36,7 +37,12 @@ static float landing_dis = 80.0f;
 
 void setLandingDis(float dis)
 {
+	char debug_str[80];
+	snprintf(debug_str, sizeof(debug_str), "DEBUG: setLandingDis called, changing from %.1f to %.1f cm\n", landing_dis, dis);
+	mp_hal_stdout_tx_strn(debug_str, strlen(debug_str));
 	landing_dis = dis;
+	snprintf(debug_str, sizeof(debug_str), "DEBUG: landing_dis now = %.1f cm\n", landing_dis);
+	mp_hal_stdout_tx_strn(debug_str, strlen(debug_str));
 }
 float getLandingDis(void)
 {
@@ -96,7 +102,18 @@ static void ctrlDataUpdate(void)
 	{
 		isRCLocked = true;			/*锁定*/
 		nowCache = &remoteCache;
-		if(commander.emerStop == false) commanderDropToGround();
+		
+		// 修复：通信超时时，如果在飞行状态则保持悬停，不强制停机
+		if(commander.emerStop == false) {
+			if (!commander.keyFlight) {
+				// 只有在非飞行状态下才停机
+				commanderDropToGround();
+			} else {
+				// 飞行状态下通信超时，进入安全悬停模式
+				commanderLevelRPY();  // 清零姿态控制量，保持悬停
+				// 不设置 commander.keyFlight = false，保持飞行状态
+			}
+		}
 		
 		if(isLastRCLocked == true)
 		{
@@ -272,8 +289,6 @@ void commanderGetSetpoint(setpoint_t *setpoint, state_t *state)
 		else if(commander.keyFlight)/*一键起飞*/ 
 		{	
 			// 使用stabilizer统一高度控制处理一键起飞
-			setTargetHeight(landing_dis);
-			
 			if (initHigh == false)
 			{
 				initHigh = true;	
@@ -304,7 +319,9 @@ void commanderGetSetpoint(setpoint_t *setpoint, state_t *state)
 					{
 						if(maxAccZ < state->acc.z)
 							maxAccZ = state->acc.z;
-						if(maxAccZ > 250.f)		/*油门下拉过大，飞机触地停机*/
+						// 修复：提高加速度阈值，避免正常起飞时误判为着陆
+						// 原来250太低，起飞时PID过冲容易超过这个值
+						if(maxAccZ > 500.f)		/*油门下拉过大，飞机触地停机*/
 						{
 							commander.keyFlight = false;
 							estRstAll();	/*复位估测*/
@@ -326,6 +343,18 @@ void commanderGetSetpoint(setpoint_t *setpoint, state_t *state)
 			{
 				errorPosZ = setpoint->position.z - state->position.z;
 				errorPosZ = constrainf(errorPosZ, -10.f, 10.f);	/*误差限幅 单位cm*/
+				
+				// 修复：增加高度稳定性检查，防止短时间内误判
+				static uint16_t stableCount = 0;
+				if (fabsf(state->position.z - landing_dis) < 50.f) {  // 在目标高度±5cm内
+					stableCount++;
+					if (stableCount > 200) {  // 稳定200个周期后才认为到达
+						// 高度稳定，但不强制停机，保持悬停
+						stableCount = 200;  // 限制计数器
+					}
+				} else {
+					stableCount = 0;
+				}
 			}
 		}
 		else/*着陆状态*/

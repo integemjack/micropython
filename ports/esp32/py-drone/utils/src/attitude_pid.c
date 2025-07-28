@@ -4,13 +4,13 @@
 #include "attitude_pid.h"
 
 
-/*角度环积分限幅*/
-#define PID_ANGLE_ROLL_INTEGRATION_LIMIT    30.0
+/*角度环积分限幅*/  
+#define PID_ANGLE_ROLL_INTEGRATION_LIMIT    25.0   /*修复：降低Roll轴积分限幅，防止积分饱和*/
 #define PID_ANGLE_PITCH_INTEGRATION_LIMIT   30.0
 #define PID_ANGLE_YAW_INTEGRATION_LIMIT     180.0
 
 /*角速度环积分限幅*/
-#define PID_RATE_ROLL_INTEGRATION_LIMIT		500.0
+#define PID_RATE_ROLL_INTEGRATION_LIMIT		400.0  /*修复：降低Roll轴角速度积分限幅*/
 #define PID_RATE_PITCH_INTEGRATION_LIMIT	500.0
 #define PID_RATE_YAW_INTEGRATION_LIMIT		50.0
 

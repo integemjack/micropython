@@ -105,11 +105,11 @@ void powerDistribution(const control_t *control)
     float m3_calc = t + r + p + y;
     float m4_calc = t + r - p - y;
     
-    // 确保所有电机功率都大于基础推力t，防止失去动力
-    motorPower.m1 = limitThrust((int16_t)(m1_calc > t ? m1_calc : t));
-    motorPower.m2 = limitThrust((int16_t)(m2_calc > t ? m2_calc : t));
-    motorPower.m3 = limitThrust((int16_t)(m3_calc > t ? m3_calc : t));
-    motorPower.m4 = limitThrust((int16_t)(m4_calc > t ? m4_calc : t));
+    // 确保所有电机功率都不小于0，防止失去动力
+    motorPower.m1 = limitThrust((int16_t)(m1_calc > 0 ? m1_calc : 0));
+    motorPower.m2 = limitThrust((int16_t)(m2_calc > 0 ? m2_calc : 0));
+    motorPower.m3 = limitThrust((int16_t)(m3_calc > 0 ? m3_calc : 0));
+    motorPower.m4 = limitThrust((int16_t)(m4_calc > 0 ? m4_calc : 0));
   #else // QUAD_FORMATION_NORMAL
     motorPower.m1 = limitThrust(control->thrust + control->pitch +control->yaw);
     motorPower.m2 = limitThrust(control->thrust - control->roll -control->yaw);
@@ -119,6 +119,12 @@ void powerDistribution(const control_t *control)
 
   if (motorSetEnable)
   {
+    // 同步手动设置的电机功率值到motorPower结构体
+    motorPower.m1 = motorPowerSet.m1;
+    motorPower.m2 = motorPowerSet.m2;
+    motorPower.m3 = motorPowerSet.m3;
+    motorPower.m4 = motorPowerSet.m4;
+    
     motorsSetRatio(MOTOR_M1, motorPowerSet.m1);
     motorsSetRatio(MOTOR_M2, motorPowerSet.m2);
     motorsSetRatio(MOTOR_M3, motorPowerSet.m3);
@@ -140,10 +146,16 @@ void powerDistribution(const control_t *control)
     }
 
     // 额外安全检查：确保电机功率不为负值或异常值
-    uint16_t m1Power = (motorPower.m1 < 0) ? 0 : motorPower.m1;
-    uint16_t m2Power = (motorPower.m2 < 0) ? 0 : motorPower.m2;
-    uint16_t m3Power = (motorPower.m3 < 0) ? 0 : motorPower.m3;
-    uint16_t m4Power = (motorPower.m4 < 0) ? 0 : motorPower.m4;
+    uint16_t m1Power = (motorPower.m1 < control->thrust) ? control->thrust : motorPower.m1;
+    uint16_t m2Power = (motorPower.m2 < control->thrust) ? control->thrust : motorPower.m2;
+    uint16_t m3Power = (motorPower.m3 < control->thrust) ? control->thrust : motorPower.m3;
+    uint16_t m4Power = (motorPower.m4 < control->thrust) ? control->thrust : motorPower.m4;
+
+    // 修复：同步实际输出的电机功率值到motorPower结构体
+    motorPower.m1 = m1Power;
+    motorPower.m2 = m2Power;
+    motorPower.m3 = m3Power;
+    motorPower.m4 = m4Power;
 
     motorsSetRatio(MOTOR_M1, m1Power);
     motorsSetRatio(MOTOR_M2, m2Power);

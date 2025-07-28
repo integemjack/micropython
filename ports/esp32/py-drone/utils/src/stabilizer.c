@@ -21,6 +21,8 @@
 #include "freertos/task.h"
 #include "esp_log.h"
 #include <string.h>
+#include "sensors_mpu6050_spl06.h"  // 包含debugpeintf()声明
+#include "py/mphal.h"  // 包含mp_hal_stdout_tx_strn()声明
 
 static bool isInit = false;
 
@@ -124,10 +126,15 @@ void setFastAdjustPosParam(uint16_t velTimes, uint16_t absTimes, float height)
 	}
 	if(absTimes != 0 && absModeTimes ==0)
 	{
+		// char debug_str[80];
+		// snprintf(debug_str, sizeof(debug_str), "DEBUG: setFastAdjustPosParam setting height=%.1f cm\n", height);
+		// debugpeintf(debug_str);
 		setHeight = height;
 		absModeTimes = absTimes;
 		// 设置目标高度时自动切换到自动高度控制模式
 		heightMode = HEIGHT_CTRL_AUTO;
+		// snprintf(debug_str, sizeof(debug_str), "DEBUG: setHeight after setFastAdjustPosParam = %.1f cm\n", setHeight);
+		// debugpeintf(debug_str);
 	}		
 }
 
@@ -207,8 +214,13 @@ void setManualThrust(float thrust)
 
 void setTargetHeight(float height)
 {
+	// char debug_str[80];
+	// snprintf(debug_str, sizeof(debug_str), "DEBUG: setTargetHeight called with height=%.1f cm\n", height);
+	// mp_hal_stdout_tx_strn(debug_str, strlen(debug_str));
 	setHeight = height;
 	heightMode = HEIGHT_CTRL_AUTO;
+	// snprintf(debug_str, sizeof(debug_str), "DEBUG: setHeight now = %.1f cm\n", setHeight);
+	// mp_hal_stdout_tx_strn(debug_str, strlen(debug_str));
 }
 
 float getAdaptiveBaseThrust(void)
@@ -270,7 +282,18 @@ static void fastAdjustPosZ(void)
 		
 		if(velModeTimes == 0)
 		{
-			setHeight = state.position.z;
+			// 检查是否在起飞状态，如果是则不要覆盖目标高度
+			if (!getCommanderKeyFlight()) {
+				char debug_str[100];
+				snprintf(debug_str, sizeof(debug_str), "DEBUG: velModeTimes=0, changing setHeight from %.1f to %.1f cm\n", 
+						 setHeight, state.position.z);
+				debugpeintf(debug_str);
+				setHeight = state.position.z;
+			} else {
+				char debug_str[80];
+				snprintf(debug_str, sizeof(debug_str), "DEBUG: velModeTimes=0 but in flight, keeping setHeight=%.1f cm\n", setHeight);
+				debugpeintf(debug_str);
+			}
 		}		
 	}
 	else if(absModeTimes > 0)

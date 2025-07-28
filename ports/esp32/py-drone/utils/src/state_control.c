@@ -4,6 +4,7 @@
 #include "attitude_pid.h"
 #include "config_param.h"
 #include "position_pid.h"
+#include "commander.h"  // 新增：用于获取飞行状态
 
 
 static float actualThrust;
@@ -89,7 +90,30 @@ void stateControl(control_t *control, sensorData_t *sensors, state_t *state, set
 
 	control->thrust = actualThrust;	
 	
-	if (control->thrust < 5.f)
+	// 优先检查紧急停止状态
+	if (getCommanderEmerStop()) {
+		// 紧急停止时立即清零所有控制量
+		control->thrust = 0;
+		control->roll = 0;
+		control->pitch = 0;
+		control->yaw = 0;
+		
+		attitudeResetAllPID();
+		positionResetAllPID();
+		attitudeDesired.yaw = state->attitude.yaw;
+		return;
+	}
+	
+	// 修复：起飞模式下不强制清零控制量，允许电机有推力
+	// 只有在非飞行状态且推力极低时才清零控制量
+	bool isInFlight = getCommanderKeyFlight();
+	
+	// 起飞模式下确保最小推力
+	if (isInFlight && control->thrust < 1000.f) {
+		control->thrust = 1000.f;  // 提供最小起飞推力
+	}
+	
+	if (control->thrust < 5.f && !isInFlight)
 	{			
 		control->roll = 0;
 		control->pitch = 0;
