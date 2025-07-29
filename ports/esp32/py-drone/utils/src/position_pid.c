@@ -58,7 +58,6 @@ static void velocityController(float* thrust, attitude_t *attitude, setpoint_t *
 	// 实现渐进式推力控制
 	static float baseThrust = 1000.0f;  // 基础推力，从1000开始
 	static uint32_t lastUpdateTime = 0;
-	static uint32_t debugCounter = 0;
 	
 	// 检查紧急停止状态
 	if (getCommanderEmerStop()) {
@@ -114,7 +113,7 @@ static void velocityController(float* thrust, attitude_t *attitude, setpoint_t *
 		}
 		
 		// 严格限制推力范围
-		if (baseThrust > 60000.0f) baseThrust = 60000.0f;
+		if (baseThrust > 55000.0f) baseThrust = 55000.0f;
 		if (baseThrust < 1000.0f) baseThrust = 1000.0f;
 	}
 	
@@ -124,8 +123,8 @@ static void velocityController(float* thrust, attitude_t *attitude, setpoint_t *
 original_logic:
 	// Roll and Pitch - 修复：为Roll轴设置独立的控制系数和滤波
 	attitude->pitch = 0.15f * pidUpdate(&pidVX, setpoint->velocity.x - state->velocity.x);
-	float rollOutput = 0.12f * pidUpdate(&pidVY, setpoint->velocity.y - state->velocity.y);
-	rollOutputLpf += (rollOutput - rollOutputLpf) * 0.3f;  /*修复：Roll轴低通滤波，减少振荡*/
+	float rollOutputOrig = 0.12f * pidUpdate(&pidVY, setpoint->velocity.y - state->velocity.y);
+	rollOutputLpf += (rollOutputOrig - rollOutputLpf) * 0.3f;  /*修复：Roll轴低通滤波，减少振荡*/
 	attitude->roll = rollOutputLpf;
 	
 	// Thrust
