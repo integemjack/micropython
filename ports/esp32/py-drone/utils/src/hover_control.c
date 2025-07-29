@@ -55,9 +55,9 @@ void hoverControlEnable(bool enable)
     if (enable && !hoverState.enabled) {
         // Reset state when enabling
         hoverControlReset();
-        ESP_LOGI(TAG, "Hover control enabled");
+        // ESP_LOGI(TAG, "Hover control enabled");
     } else if (!enable && hoverState.enabled) {
-        ESP_LOGI(TAG, "Hover control disabled");
+        // ESP_LOGI(TAG, "Hover control disabled");
     }
     
     hoverState.enabled = enable;
@@ -69,8 +69,9 @@ void hoverControlSetTarget(float x, float y, float height)
     hoverState.targetY = y;
     hoverState.targetHeight = height;
     
-    ESP_LOGI(TAG, "Hover target set to: X=%.1f, Y=%.1f, Height=%.1f cm", 
-             x, y, height);
+    // 避免频繁日志输出导致实时系统阻塞
+    // ESP_LOGI(TAG, "Hover target set to: X=%.1f, Y=%.1f, Height=%.1f cm", 
+    //          x, y, height);
 }
 
 void hoverControlUpdate(flowMeasurement_t* flow, tofMeasurement_t* tof, 
@@ -83,7 +84,7 @@ void hoverControlUpdate(flowMeasurement_t* flow, tofMeasurement_t* tof,
     uint32_t currentTime = xTaskGetTickCount();
     
     // Update position estimate from optical flow
-    if (flow && flow->dt > 0) {
+    if (flow && flow->dt > 0.001f) {  // 确保dt有效，避免除零错误
         // Convert flow measurements to velocity
         float flowVelX = flow->dpixelx / flow->dt * FLOW_SCALE_FACTOR;
         float flowVelY = flow->dpixely / flow->dt * FLOW_SCALE_FACTOR;
@@ -135,15 +136,15 @@ void hoverControlUpdate(flowMeasurement_t* flow, tofMeasurement_t* tof,
     hoverState.lastUpdateTime = currentTime;
     
     // Log periodically for debugging
-    static uint32_t lastLogTime = 0;
-    if (currentTime - lastLogTime > 1000) {  // Log every second
-        ESP_LOGD(TAG, "Hover: Pos(%.1f,%.1f) Target(%.1f,%.1f) Vel(%.1f,%.1f) Height:%.1f", 
-                 hoverState.posX, hoverState.posY,
-                 hoverState.targetX, hoverState.targetY,
-                 velCmdX, velCmdY,
-                 state->position.z);
-        lastLogTime = currentTime;
-    }
+    // static uint32_t lastLogTime = 0;
+    // if (currentTime - lastLogTime > 1000) {  // Log every second
+    //     ESP_LOGD(TAG, "Hover: Pos(%.1f,%.1f) Target(%.1f,%.1f) Vel(%.1f,%.1f) Height:%.1f", 
+    //              hoverState.posX, hoverState.posY,
+    //              hoverState.targetX, hoverState.targetY,
+    //              velCmdX, velCmdY,
+    //              state->position.z);
+    //     lastLogTime = currentTime;
+    // }
 }
 
 void hoverControlReset(void)
@@ -158,7 +159,7 @@ void hoverControlReset(void)
         pidReset(&hoverPidY);
     }
     
-    ESP_LOGI(TAG, "Hover control state reset");
+    // ESP_LOGI(TAG, "Hover control state reset");
 }
 
 bool hoverControlIsActive(void)

@@ -110,11 +110,14 @@ static void velocityController(float* thrust, attitude_t *attitude, setpoint_t *
 		} else if (heightError < -50.0f) {
 			// 超过目标较少，小幅减少推力
 			baseThrust -= 200.0f;
+		} else {
+			// 在目标高度附近(±50mm内)，保持当前推力不变，实现悬停
+			// baseThrust保持不变，避免推力为零
 		}
 		
 		// 严格限制推力范围
-		if (baseThrust > 55000.0f) baseThrust = 55000.0f;
-		if (baseThrust < 1000.0f) baseThrust = 1000.0f;
+		if (baseThrust > 43000.0f) baseThrust = 43000.0f;
+		if (baseThrust < 18000.0f) baseThrust = 18000.0f;  // 提高最小推力到18000，确保能够维持悬停
 	}
 	
 	*thrust = baseThrust;
