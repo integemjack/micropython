@@ -146,12 +146,13 @@ void updateHeightControl(void)
 	
 	// 传感器融合：TOF + 气压计
 	float fusedHeight = currentHeight;
-	if (tofAvailable && tofData.distance > 0) {
+	if (tofAvailable && tofData.distance > 40.0f) {
 		float tofHeightCm = tofData.distance / 10.0f; // mm to cm
 		// TOF在近距离时权重更高
-		if (tofHeightCm < 200.0f) {
-			float tofWeight = 0.7f - (tofHeightCm / 400.0f) * 0.4f; // 5-200cm: 0.7-0.3权重
-			fusedHeight = currentHeight * (1.0f - tofWeight) + tofHeightCm * tofWeight;
+		if (tofHeightCm < 400.0f) {
+			// float tofWeight = 0.7f - (tofHeightCm / 400.0f) * 0.4f; // 5-200cm: 0.7-0.3权重
+			// fusedHeight = currentHeight * (1.0f - tofWeight) + tofHeightCm * tofWeight;
+			fusedHeight = tofHeightCm;
 		}
 	}
 	
@@ -391,7 +392,11 @@ void stabilizerTask(void* param)
 			if (tofAvailable && tofData.distance > 0) {
 				float tofHeightCm = tofData.distance / 10.0f; // mm to cm
 				// TOF在近距离时权重更高
-				if (tofHeightCm > 10.0f) {
+				if (tofHeightCm >= 8.0f) {
+					if (!hoverControlIsActive()) {
+						hoverControlEnable(true); // 停止悬停控制
+						hoverControlSetTarget(state.position.x, state.position.y, setHeight);
+					}
 					hoverControlUpdate(&flowData, &tofData, &setpoint, &state, 0.01f, setHeight);
 				}
 			}

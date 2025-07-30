@@ -1,5 +1,6 @@
 /**
  * hover_control.c - Implementation of hover/position hold using optical flow and TOF
+ * Enhanced with Z-axis PID control
  */
 
 #include "hover_control.h"
@@ -19,20 +20,27 @@ static const char* TAG = "hover_control";
 #define FLOW_SCALE_FACTOR   0.1f    // Scale factor for optical flow to cm
 #define HEIGHT_FILTER_ALPHA 0.2f    // Low pass filter for height measurement
 #define POSITION_DECAY      0.995f  // Position estimate decay factor
+#define HEIGHT_VEL_FILTER_ALPHA 0.3f // Filter for height velocity estimation
+#define MIN_TOF_DISTANCE    10.0f   // Minimum valid TOF distance (cm)
+#define MAX_TOF_DISTANCE    400.0f  // Maximum valid TOF distance (cm)
 
 static hoverControl_t hoverState = {
     .enabled = false,
     .targetX = 0.0f,
     .targetY = 0.0f,
-    .targetHeight = 100.0f,  // Default 100cm height
+    .targetHeight = 80.0f,  // Default 80cm height
     .posX = 0.0f,
     .posY = 0.0f,
+    .currentHeight = 80.0f,
+    .heightVelocity = 0.0f,
+    .lastHeight = 80.0f,
     .lastUpdateTime = 0
 };
 
-// PID controllers for hover
+// PID controllers for hover (X, Y, Z)
 static PidObject hoverPidX;
 static PidObject hoverPidY;
+static PidObject hoverPidZ;    // 新增Z轴PID控制器
 static bool isPidInit = false;
 
 void hoverControlInit(void)
@@ -42,12 +50,16 @@ void hoverControlInit(void)
         pidInit(&hoverPidX, 0, (pidInit_t){.kp = 0.5f, .ki = 0.01f, .kd = 0.1f}, 0.01f);
         pidInit(&hoverPidY, 0, (pidInit_t){.kp = 0.5f, .ki = 0.01f, .kd = 0.1f}, 0.01f);
         
-        // Set output limits (velocity in cm/s)
-        pidSetOutputLimit(&hoverPidX, 50.0f);
-        pidSetOutputLimit(&hoverPidY, 50.0f);
+        // Initialize Z-axis PID with different gains optimized for height control
+        pidInit(&hoverPidZ, 0, (pidInit_t){.kp = 0.8f, .ki = 0.05f, .kd = 0.2f}, 0.01f);
+        
+        // Set output limits 
+        pidSetOutputLimit(&hoverPidX, 50.0f);  // velocity in cm/s
+        pidSetOutputLimit(&hoverPidY, 50.0f);  // velocity in cm/s
+        pidSetOutputLimit(&hoverPidZ, 10.0f);  // vertical velocity in cm/s
         
         isPidInit = true;
-        ESP_LOGI(TAG, "Hover control initialized");
+        ESP_LOGI(TAG, "Hover control initialized with Z-axis PID");
     }
 }
 
@@ -56,9 +68,9 @@ void hoverControlEnable(bool enable)
     if (enable && !hoverState.enabled) {
         // Reset state when enabling
         hoverControlReset();
-        // ESP_LOGI(TAG, "Hover control enabled");
+        ESP_LOGI(TAG, "Hover control enabled");
     } else if (!enable && hoverState.enabled) {
-        // ESP_LOGI(TAG, "Hover control disabled");
+        ESP_LOGI(TAG, "Hover control disabled");
     }
     
     hoverState.enabled = enable;
@@ -70,17 +82,16 @@ void hoverControlSetTarget(float x, float y, float height)
     hoverState.targetY = y;
     hoverState.targetHeight = height;
     
-    // 避免频繁日志输出导致实时系统阻塞
-    // ESP_LOGI(TAG, "Hover target set to: X=%.1f, Y=%.1f, Height=%.1f cm", 
-    //          x, y, height);
+    ESP_LOGI(TAG, "Hover target set to: X=%.1f, Y=%.1f, Height=%.1f cm", 
+             x, y, height);
 }
 
 void hoverControlUpdate(flowMeasurement_t* flow, tofMeasurement_t* tof, 
                        setpoint_t* setpoint, state_t* state, float dt, float height)
 {
-    // if (!hoverState.enabled) {
-    //     return;
-    // }
+    if (!hoverState.enabled) {
+        return;
+    }
     
     uint32_t currentTime = xTaskGetTickCount();
     
@@ -106,72 +117,120 @@ void hoverControlUpdate(flowMeasurement_t* flow, tofMeasurement_t* tof,
         hoverState.posY *= POSITION_DECAY;
     }
     
-    // Update height from TOF sensor
-    float targetHeight = height;
+    // Enhanced height control with TOF sensor
+    bool heightUpdated = false;
     if (tof && tof->distance > 0) {
-        // Convert mm to cm and apply low-pass filter
+        // Convert mm to cm and validate range
         float measuredHeight = tof->distance / 10.0f;
-        state->position.z = state->position.z * (1.0f - HEIGHT_FILTER_ALPHA) + 
-                           measuredHeight * HEIGHT_FILTER_ALPHA;
+        
+        // Validate TOF measurement range
+        if (measuredHeight >= MIN_TOF_DISTANCE && measuredHeight <= MAX_TOF_DISTANCE) {
+            // Apply low-pass filter to height measurement
+            hoverState.currentHeight = hoverState.currentHeight * (1.0f - HEIGHT_FILTER_ALPHA) + 
+                                     measuredHeight * HEIGHT_FILTER_ALPHA;
+            
+            // Estimate height velocity using filtered difference
+            float heightDiff = hoverState.currentHeight - hoverState.lastHeight;
+            float instantVel = (dt > 0.001f) ? heightDiff / dt : 0.0f;
+            
+            // Filter height velocity to reduce noise
+            hoverState.heightVelocity = hoverState.heightVelocity * (1.0f - HEIGHT_VEL_FILTER_ALPHA) +
+                                      instantVel * HEIGHT_VEL_FILTER_ALPHA;
+            
+            hoverState.lastHeight = hoverState.currentHeight;
+            heightUpdated = true;
+            
+            // Update state position for compatibility
+            state->position.z = hoverState.currentHeight;
+        }
     }
     
-    // Calculate position errors
+    // Calculate position errors for X and Y
     float errorX = hoverState.targetX - hoverState.posX;
     float errorY = hoverState.targetY - hoverState.posY;
     
-    // Update velocity setpoints using PID
-    float velCmdX = pidUpdate(&hoverPidX, errorX);
-    float velCmdY = pidUpdate(&hoverPidY, errorY);
+    // Calculate height error for Z
+    float errorZ = hoverState.targetHeight - hoverState.currentHeight;
     
-    // Set velocity mode for X and Y
+    // Update velocity setpoints using PID controllers
+    float velCmdX = 0.12f * pidUpdate(&hoverPidX, errorX);
+    float velCmdY = 0.12f * pidUpdate(&hoverPidY, errorY);
+    
+    // Z-axis PID control - output is vertical velocity command
+    float velCmdZ = 0.0f;
+    if (heightUpdated) {
+        velCmdZ = pidUpdate(&hoverPidZ, errorZ);
+        
+        // Add velocity feedforward for smoother control
+        velCmdZ += 0.1f * hoverState.heightVelocity;
+    }
+    
+    // Set control modes and commands
+    // XY: Velocity control mode
     setpoint->mode.x = modeVelocity;
     setpoint->mode.y = modeVelocity;
     setpoint->velocity.x = velCmdX;
     setpoint->velocity.y = velCmdY;
     
-    // Set absolute mode for Z (height)
-    setpoint->mode.z = modeAbs;
-    setpoint->position.z = targetHeight;
+    // Z: Velocity control mode (changed from absolute position)
+    setpoint->mode.z = modeVelocity;
+    setpoint->velocity.z = velCmdZ;
+    
+    // Alternative: Use thrust mode for more direct control
+    // setpoint->mode.z = modeManual;
+    // setpoint->thrust = calculateThrustFromVelocity(velCmdZ, state);
     
     // Update timestamp
     hoverState.lastUpdateTime = currentTime;
     
-    // Log periodically for debugging
-    // static uint32_t lastLogTime = 0;
-    // if (currentTime - lastLogTime > 1000) {  // Log every second
-    //     // char debug_str[100];
-    //     // snprintf(debug_str, sizeof(debug_str), "Hover: Pos(%.1f,%.1f) Target(%.1f,%.1f) Vel(%.1f,%.1f) Height:%.1f\r\n",
-    //     //          hoverState.posX, hoverState.posY,
-    //     //          hoverState.targetX, hoverState.targetY,
-    //     //          velCmdX, velCmdY,
-    //     //          state->position.z);
-    //     // debugpeintf(debug_str);
-    //     // Log to ESP log
-    //     // ESP_LOGD(TAG, "Hover: Pos(%.1f,%.1f) Target(%.1f,%.1f) Vel(%.1f,%.1f) Height:%.1f", 
-    //     //          hoverState.posX, hoverState.posY,
-    //     //          hoverState.targetX, hoverState.targetY,
-    //     //          velCmdX, velCmdY,
-    //     //          state->position.z);
-    //     lastLogTime = currentTime;
-    // }
+    // Periodic logging for debugging
+    static uint32_t lastLogTime = 0;
+    if (currentTime - lastLogTime > 2000) {  // Log every 2 seconds
+        ESP_LOGD(TAG, "Hover: Pos(%.1f,%.1f,%.1f) Target(%.1f,%.1f,%.1f) VelCmd(%.2f,%.2f,%.2f)", 
+                 hoverState.posX, hoverState.posY, hoverState.currentHeight,
+                 hoverState.targetX, hoverState.targetY, hoverState.targetHeight,
+                 velCmdX, velCmdY, velCmdZ);
+        lastLogTime = currentTime;
+    }
 }
 
 void hoverControlReset(void)
 {
     hoverState.posX = 0.0f;
     hoverState.posY = 0.0f;
+    hoverState.currentHeight = 80.0f;  // Reset to default height
+    hoverState.heightVelocity = 0.0f;
+    hoverState.lastHeight = 80.0f;
     hoverState.lastUpdateTime = xTaskGetTickCount();
     
-    // Reset PIDs
+    // Reset all PIDs including Z-axis
     if (isPidInit) {
         pidReset(&hoverPidX);
         pidReset(&hoverPidY);
+        pidReset(&hoverPidZ);  // Reset Z-axis PID
     }
     
-    // ESP_LOGI(TAG, "Hover control state reset");
+    ESP_LOGI(TAG, "Hover control state reset");
 }
 
 bool hoverControlIsActive(void)
 {
     return hoverState.enabled;
+}
+
+// New function to get current hover state
+hoverControl_t* hoverControlGetState(void)
+{
+    return &hoverState;
+}
+
+// New function to adjust Z-axis PID parameters
+void hoverControlSetZPidGains(float kp, float ki, float kd)
+{
+    if (isPidInit) {
+        pidInit_t gains = {.kp = kp, .ki = ki, .kd = kd};
+        pidInit(&hoverPidZ, 0, gains, 0.01f);
+        pidSetOutputLimit(&hoverPidZ, 30.0f);
+        ESP_LOGI(TAG, "Z-axis PID gains updated: kp=%.3f, ki=%.3f, kd=%.3f", kp, ki, kd);
+    }
 }
