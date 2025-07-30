@@ -36,7 +36,7 @@ void hoverControlSetTarget(float x, float y, float height);
 
 // Update hover control with sensor data
 void hoverControlUpdate(flowMeasurement_t* flow, tofMeasurement_t* tof, 
-                       setpoint_t* setpoint, state_t* state, float dt);
+                       setpoint_t* setpoint, state_t* state, float dt, float height);
 
 // Reset hover control state
 void hoverControlReset(void);

@@ -116,7 +116,7 @@ static void velocityController(float* thrust, attitude_t *attitude, setpoint_t *
 		}
 		
 		// 严格限制推力范围
-		if (baseThrust > 43000.0f) baseThrust = 43000.0f;
+		if (baseThrust > 55000.0f) baseThrust = 55000.0f;
 		if (baseThrust < 18000.0f) baseThrust = 18000.0f;  // 提高最小推力到18000，确保能够维持悬停
 	}
 	
@@ -254,6 +254,11 @@ void positionController(float* thrust, attitude_t *attitude, setpoint_t *setpoin
 			targetVelocity *= 0.6f;  // 降低到60%的速度
 		}
 		
+		// 修复：当高度误差非常小时，直接设置速度为0，实现精确悬停
+		if (fabsf(heightError) < 10.f) {  // 1cm内
+			targetVelocity = 0.0f;
+		}
+		
 		setpoint->velocity.z = targetVelocity;
 	}
 	
@@ -303,7 +308,3 @@ void positionPIDwriteToConfigParam(void)
 	configParam.pidPos.z.ki  = pidZ.ki;
 	configParam.pidPos.z.kd  = pidZ.kd;
 }
-
-
-
-

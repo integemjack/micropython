@@ -23,6 +23,7 @@
 #include <string.h>
 #include "sensors_mpu6050_spl06.h"  // 包含debugpeintf()声明
 #include "py/mphal.h"  // 包含mp_hal_stdout_tx_strn()声明
+#include "hover_control.h"
 
 static bool isInit = false;
 
@@ -168,7 +169,10 @@ void updateHeightControl(void)
 			{
 				float heightError = setHeight - fusedHeight;
 				
-				if (fabs(heightError) > 5.0f) {
+				// 当高度误差很小时，直接设置推力为悬停推力
+				if (fabs(heightError) < 2.0f) {  // 2cm内
+					// adaptiveBaseThrust = 20000.0f;
+				} else {
 					float thrustAdjustment = heightError * 100.0f; // 每cm误差100推力值
 					adaptiveBaseThrust = 20000.0f + constrainf(thrustAdjustment, -8000, 12000);
 					
@@ -177,8 +181,6 @@ void updateHeightControl(void)
 						float smoothFactor = fabs(heightError) / 20.0f;
 						adaptiveBaseThrust = 20000.0f + thrustAdjustment * smoothFactor;
 					}
-				} else {
-					adaptiveBaseThrust = 20000.0f;
 				}
 				
 				setpoint.mode.z = modeAbs;
@@ -382,6 +384,17 @@ void stabilizerTask(void* param)
 		if (RATE_DO_EXECUTE(RATE_500_HZ, tick))
 		{
 			powerDistribution(&control);
+		}
+
+		if (RATE_DO_EXECUTE(RATE_500_HZ, tick))
+		{
+			if (tofAvailable && tofData.distance > 0) {
+				float tofHeightCm = tofData.distance / 10.0f; // mm to cm
+				// TOF在近距离时权重更高
+				if (tofHeightCm > 10.0f) {
+					hoverControlUpdate(&flowData, &tofData, &setpoint, &state, 0.01f, setHeight);
+				}
+			}
 		}
 		tick++;
 	}

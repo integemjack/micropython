@@ -11,6 +11,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "config.h"  // 添加 config.h 引用，其中包含 DEG2RAD 定义
+#include "sensors_mpu6050_spl06.h"  // 包含debugpeintf()声明
 
 static const char* TAG = "hover_control";
 
@@ -75,11 +76,11 @@ void hoverControlSetTarget(float x, float y, float height)
 }
 
 void hoverControlUpdate(flowMeasurement_t* flow, tofMeasurement_t* tof, 
-                       setpoint_t* setpoint, state_t* state, float dt)
+                       setpoint_t* setpoint, state_t* state, float dt, float height)
 {
-    if (!hoverState.enabled) {
-        return;
-    }
+    // if (!hoverState.enabled) {
+    //     return;
+    // }
     
     uint32_t currentTime = xTaskGetTickCount();
     
@@ -106,7 +107,7 @@ void hoverControlUpdate(flowMeasurement_t* flow, tofMeasurement_t* tof,
     }
     
     // Update height from TOF sensor
-    float targetHeight = hoverState.targetHeight;
+    float targetHeight = height;
     if (tof && tof->distance > 0) {
         // Convert mm to cm and apply low-pass filter
         float measuredHeight = tof->distance / 10.0f;
@@ -138,11 +139,19 @@ void hoverControlUpdate(flowMeasurement_t* flow, tofMeasurement_t* tof,
     // Log periodically for debugging
     // static uint32_t lastLogTime = 0;
     // if (currentTime - lastLogTime > 1000) {  // Log every second
-    //     ESP_LOGD(TAG, "Hover: Pos(%.1f,%.1f) Target(%.1f,%.1f) Vel(%.1f,%.1f) Height:%.1f", 
-    //              hoverState.posX, hoverState.posY,
-    //              hoverState.targetX, hoverState.targetY,
-    //              velCmdX, velCmdY,
-    //              state->position.z);
+    //     // char debug_str[100];
+    //     // snprintf(debug_str, sizeof(debug_str), "Hover: Pos(%.1f,%.1f) Target(%.1f,%.1f) Vel(%.1f,%.1f) Height:%.1f\r\n",
+    //     //          hoverState.posX, hoverState.posY,
+    //     //          hoverState.targetX, hoverState.targetY,
+    //     //          velCmdX, velCmdY,
+    //     //          state->position.z);
+    //     // debugpeintf(debug_str);
+    //     // Log to ESP log
+    //     // ESP_LOGD(TAG, "Hover: Pos(%.1f,%.1f) Target(%.1f,%.1f) Vel(%.1f,%.1f) Height:%.1f", 
+    //     //          hoverState.posX, hoverState.posY,
+    //     //          hoverState.targetX, hoverState.targetY,
+    //     //          velCmdX, velCmdY,
+    //     //          state->position.z);
     //     lastLogTime = currentTime;
     // }
 }
