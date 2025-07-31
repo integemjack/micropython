@@ -32,14 +32,19 @@
 
 static const char* TAG = "hover_improved";
 
-// 第一层控制：姿态校准参数
-#define ATTITUDE_COMPENSATION_GAIN  0.85f   // 姿态补偿增益（主要参数）
-#define ATTITUDE_DEADBAND          0.3f     // 姿态角死区（度）
-#define MAX_ATTITUDE_COMPENSATION  8.0f     // 最大姿态补偿角度（度）
-#define ATTITUDE_STABLE_THRESHOLD  1.5f     // 姿态稳定阈值（度）
-#define ATTITUDE_FILTER_ALPHA      0.3f     // 姿态角滤波系数
+// 第一层控制：姿态校准参数（优化版本，防止高度抖动）
+#define ATTITUDE_COMPENSATION_GAIN  1.0f    // 直接补偿到平衡点，确保推力垂直
+#define ATTITUDE_DEADBAND          0.8f     // 增大死区，减少小角度噪声的影响
+#define MAX_ATTITUDE_COMPENSATION  3.0f     // 大幅降低最大补偿，防止剧烈机动
+#define ATTITUDE_STABLE_THRESHOLD  2.5f     // 放宽稳定阈值，减少频繁切换
+#define ATTITUDE_FILTER_ALPHA      0.15f    // 降低滤波系数，增强平滑性
 
-// 姿态校准控制状态
+// 高度自适应参数
+#define HEIGHT_GAIN_SCALE_FACTOR   0.1f     // 高度增益缩放因子
+#define MIN_HEIGHT_FOR_SCALING     50.0f    // 开始缩放的最小高度(cm)
+#define MAX_HEIGHT_FOR_SCALING     200.0f   // 最大缩放高度(cm)
+
+// 姿态校准控制状态（优化版本）
 typedef struct {
     bool enabled;                   // 姿态校准是否启用
     bool attitudeStable;           // 姿态是否稳定（关键状态）
@@ -48,9 +53,21 @@ typedef struct {
     float compensationRoll;        // Roll轴补偿角度
     float compensationPitch;       // Pitch轴补偿角度
     
-    // 姿态滤波值
-    float filteredRoll;            // 滤波后的Roll角
-    float filteredPitch;           // 滤波后的Pitch角
+    // 姿态滤波值（多级滤波）
+    float filteredRoll;            // 一级滤波后的Roll角
+    float filteredPitch;           // 一级滤波后的Pitch角
+    float smoothedRoll;            // 二级平滑后的Roll角
+    float smoothedPitch;           // 二级平滑后的Pitch角
+    
+    // 振荡检测
+    float lastCompensationRoll;    // 上次补偿Roll
+    float lastCompensationPitch;   // 上次补偿Pitch
+    uint32_t oscillationCounter;   // 振荡计数器
+    bool oscillationDetected;      // 振荡检测标志
+    
+    // 高度自适应
+    float currentHeight;           // 当前高度
+    float heightBasedGain;         // 基于高度的动态增益
     
     // 稳定性监控
     uint32_t stableCounter;        // 稳定计数器
@@ -66,6 +83,14 @@ static attitudeControl_t attitudeState = {
     .compensationPitch = 0.0f,
     .filteredRoll = 0.0f,
     .filteredPitch = 0.0f,
+    .smoothedRoll = 0.0f,
+    .smoothedPitch = 0.0f,
+    .lastCompensationRoll = 0.0f,
+    .lastCompensationPitch = 0.0f,
+    .oscillationCounter = 0,
+    .oscillationDetected = false,
+    .currentHeight = 80.0f,
+    .heightBasedGain = 1.0f,
     .stableCounter = 0,
     .unstableCounter = 0,
     .lastUpdateTime = 0
@@ -92,41 +117,126 @@ void improvedHoverControlInit(void)
 }
 
 /**
- * 第一层控制：姿态稳定算法
- * 
- * 职责：确保推力向量垂直，为第二层光流控制创造前提
- * 核心：主动补偿姿态角，防止水平分量产生
+ * 高度自适应增益计算
+ * 随着高度增加，降低补偿增益，防止高空抖动
  */
-bool performAttitudeStabilization(attitude_t* attitude, setpoint_t* setpoint, float dt)
+void updateHeightBasedGain(float height)
+{
+    attitudeState.currentHeight = height;
+    
+    if (height < MIN_HEIGHT_FOR_SCALING) {
+        // 低空：使用全增益
+        attitudeState.heightBasedGain = 1.0f;
+    } else if (height > MAX_HEIGHT_FOR_SCALING) {
+        // 高空：使用最小增益
+        attitudeState.heightBasedGain = HEIGHT_GAIN_SCALE_FACTOR;
+    } else {
+        // 中间高度：线性缩放
+        float heightRatio = (height - MIN_HEIGHT_FOR_SCALING) / (MAX_HEIGHT_FOR_SCALING - MIN_HEIGHT_FOR_SCALING);
+        attitudeState.heightBasedGain = 1.0f - heightRatio * (1.0f - HEIGHT_GAIN_SCALE_FACTOR);
+    }
+}
+
+/**
+ * 振荡检测算法
+ * 检测补偿值是否在振荡，如果振荡则降低增益
+ */
+bool detectOscillation(void)
+{
+    // 计算补偿变化量
+    float rollChange = attitudeState.compensationRoll - attitudeState.lastCompensationRoll;
+    float pitchChange = attitudeState.compensationPitch - attitudeState.lastCompensationPitch;
+    
+    // 检测是否反向变化（振荡特征）
+    bool rollOscillating = (rollChange * attitudeState.lastCompensationRoll < 0) && 
+                          (fabsf(rollChange) > 0.5f);
+    bool pitchOscillating = (pitchChange * attitudeState.lastCompensationPitch < 0) && 
+                           (fabsf(pitchChange) > 0.5f);
+    
+    if (rollOscillating || pitchOscillating) {
+        attitudeState.oscillationCounter++;
+        if (attitudeState.oscillationCounter > 5) {  // 连续5次振荡
+            attitudeState.oscillationDetected = true;
+        }
+    } else {
+        attitudeState.oscillationCounter = (attitudeState.oscillationCounter > 0) ? 
+                                          attitudeState.oscillationCounter - 1 : 0;
+        if (attitudeState.oscillationCounter == 0) {
+            attitudeState.oscillationDetected = false;
+        }
+    }
+    
+    // 更新历史值
+    attitudeState.lastCompensationRoll = attitudeState.compensationRoll;
+    attitudeState.lastCompensationPitch = attitudeState.compensationPitch;
+    
+    return attitudeState.oscillationDetected;
+}
+
+/**
+ * 第一层控制：优化的姿态稳定算法
+ * 
+ * 优化内容：
+ * 1. 高度自适应增益：高空自动降低增益
+ * 2. 振荡检测：检测到振荡自动减弱补偿
+ * 3. 多级滤波：更平滑的姿态角处理
+ * 4. 保守参数：防止过度补偿导致炸机
+ */
+bool performAttitudeStabilization(attitude_t* attitude, setpoint_t* setpoint, float dt, float height)
 {
     if (!attitudeState.enabled) {
         return false;
     }
     
-    // 1. 姿态角滤波（减少噪声）
+    // 0. 更新高度自适应增益
+    updateHeightBasedGain(height);
+    
+    // 1. 多级姿态角滤波（更强的平滑效果）
+    // 一级滤波：快速响应
     attitudeState.filteredRoll = attitudeState.filteredRoll * (1.0f - ATTITUDE_FILTER_ALPHA) + 
                                 attitude->roll * ATTITUDE_FILTER_ALPHA;
     attitudeState.filteredPitch = attitudeState.filteredPitch * (1.0f - ATTITUDE_FILTER_ALPHA) + 
                                  attitude->pitch * ATTITUDE_FILTER_ALPHA;
     
-    // 2. 计算姿态补偿（核心算法）
-    if (fabsf(attitudeState.filteredRoll) > ATTITUDE_DEADBAND) {
-        // Roll轴补偿：产生反向角度抵消水平分量
-        attitudeState.compensationRoll = -attitudeState.filteredRoll * ATTITUDE_COMPENSATION_GAIN;
-    } else {
-        // 在死区内逐渐减小补偿
-        attitudeState.compensationRoll *= 0.9f;
+    // 二级平滑：抑制高频振荡
+    float smoothing_alpha = 0.1f;  // 更强的平滑
+    attitudeState.smoothedRoll = attitudeState.smoothedRoll * (1.0f - smoothing_alpha) + 
+                                attitudeState.filteredRoll * smoothing_alpha;
+    attitudeState.smoothedPitch = attitudeState.smoothedPitch * (1.0f - smoothing_alpha) + 
+                                 attitudeState.filteredPitch * smoothing_alpha;
+    
+    // 2. 优化的姿态补偿计算
+    // 使用平滑后的角度进行补偿计算，减少高频振荡
+    float baseGain = ATTITUDE_COMPENSATION_GAIN;
+    
+    // 应用高度自适应增益
+    float adaptiveGain = baseGain * attitudeState.heightBasedGain;
+    
+    // 检测振荡并应用振荡抑制
+    bool isOscillating = detectOscillation();
+    if (isOscillating) {
+        adaptiveGain *= 0.5f;  // 振荡时减半增益
+        ESP_LOGW(TAG, "Oscillation detected, reducing gain to %.3f", adaptiveGain);
     }
     
-    if (fabsf(attitudeState.filteredPitch) > ATTITUDE_DEADBAND) {
-        // Pitch轴补偿：产生反向角度抵消水平分量
-        attitudeState.compensationPitch = -attitudeState.filteredPitch * ATTITUDE_COMPENSATION_GAIN;
+    // 直接补偿到平衡点
+    if (fabsf(attitudeState.smoothedRoll) > ATTITUDE_DEADBAND) {
+        // 直接补偿到0°，确保推力垂直
+        attitudeState.compensationRoll = -attitudeState.smoothedRoll * adaptiveGain;
     } else {
-        // 在死区内逐渐减小补偿
-        attitudeState.compensationPitch *= 0.9f;
+        // 在死区内清零补偿
+        attitudeState.compensationRoll = 0.0f;
     }
     
-    // 3. 限制补偿幅度，防止过度补偿
+    if (fabsf(attitudeState.smoothedPitch) > ATTITUDE_DEADBAND) {
+        // 直接补偿到0°，确保推力垂直
+        attitudeState.compensationPitch = -attitudeState.smoothedPitch * adaptiveGain;
+    } else {
+        // 在死区内清零补偿
+        attitudeState.compensationPitch = 0.0f;
+    }
+    
+    // 3. 更严格的补偿限制，防止剧烈机动
     attitudeState.compensationRoll = constrainf(attitudeState.compensationRoll, 
                                               -MAX_ATTITUDE_COMPENSATION, 
                                               MAX_ATTITUDE_COMPENSATION);
@@ -138,20 +248,21 @@ bool performAttitudeStabilization(attitude_t* attitude, setpoint_t* setpoint, fl
     setpoint->attitude.roll += attitudeState.compensationRoll;
     setpoint->attitude.pitch += attitudeState.compensationPitch;
     
-    // 5. 评估姿态稳定性（关键判断）
-    float totalAttitudeError = fabsf(attitudeState.filteredRoll) + fabsf(attitudeState.filteredPitch);
+    // 5. 优化的稳定性判断（更保守的策略）
+    float totalAttitudeError = fabsf(attitudeState.smoothedRoll) + fabsf(attitudeState.smoothedPitch);
     float totalCompensation = fabsf(attitudeState.compensationRoll) + fabsf(attitudeState.compensationPitch);
     
-    // 判断逻辑：同时满足姿态角小和补偿量小，才认为稳定
+    // 更严格的稳定判断：考虑振荡状态和高度因子
     bool currentlyStable = (totalAttitudeError < ATTITUDE_STABLE_THRESHOLD) && 
-                          (totalCompensation < 1.0f);  // 补偿量小于1度
+                          (totalCompensation < 1.5f) &&  // 放宽补偿阈值
+                          (!attitudeState.oscillationDetected);  // 不能有振荡
     
     if (currentlyStable) {
         attitudeState.stableCounter++;
         attitudeState.unstableCounter = 0;
         
-        // 连续稳定15个周期才认为姿态稳定（更严格）
-        if (attitudeState.stableCounter >= 15) {
+        // 更严格的稳定要求：连续25个周期才认为稳定
+        if (attitudeState.stableCounter >= 25) {
             attitudeState.attitudeStable = true;
         }
     } else {
@@ -162,13 +273,15 @@ bool performAttitudeStabilization(attitude_t* attitude, setpoint_t* setpoint, fl
         attitudeState.attitudeStable = false;
     }
     
-    // 6. 调试输出
+    // 6. 增强的调试输出
     static uint32_t debugCounter = 0;
     if (++debugCounter % 250 == 0) { // 每0.5秒输出一次
-        ESP_LOGD(TAG, "Layer1: Att(R=%.2f°,P=%.2f°) Comp(R=%.2f°,P=%.2f°) Status=%s", 
-                 attitudeState.filteredRoll, attitudeState.filteredPitch,
+        ESP_LOGD(TAG, "Layer1: H=%.0fcm Gain=%.3f Att(R=%.2f°,P=%.2f°) Comp(R=%.2f°,P=%.2f°) Osc=%s Status=%s", 
+                 attitudeState.currentHeight, attitudeState.heightBasedGain,
+                 attitudeState.smoothedRoll, attitudeState.smoothedPitch,
                  attitudeState.compensationRoll, attitudeState.compensationPitch,
-                 attitudeState.attitudeStable ? "STABLE-OK_FOR_LAYER2" : "ADJUSTING-BLOCK_LAYER2");
+                 attitudeState.oscillationDetected ? "YES" : "NO",
+                 attitudeState.attitudeStable ? "STABLE" : "ADJUSTING");
     }
     
     // 返回姿态是否稳定（决定是否启用第二层控制）
@@ -213,8 +326,8 @@ bool isAttitudeStabilized(void)
 bool improvedHoverControlUpdate(flowMeasurement_t* flow, tofMeasurement_t* tof, 
                                setpoint_t* setpoint, state_t* state, float dt, float height)
 {
-    // 执行第一层姿态稳定控制
-    bool attitudeStable = performAttitudeStabilization(&state->attitude, setpoint, dt);
+    // 执行第一层优化的姿态稳定控制（传入高度参数）
+    bool attitudeStable = performAttitudeStabilization(&state->attitude, setpoint, dt, height);
     
     // 设置控制模式为姿态角控制（第一层只管姿态）
     setpoint->mode.roll = modeAbs;   // 绝对姿态角控制

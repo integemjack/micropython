@@ -404,8 +404,9 @@ void stabilizerTask(void* param)
 						ESP_LOGI("STABILIZER", "Layer 1: Attitude stabilization activated");
 					}
 					
-					// 执行第一层控制：姿态校准，返回是否需要调整
-					bool attitudeNeedsAdjustment = !improvedHoverControlUpdate(&flowData, &tofData, &setpoint, &state, 0.002f, setHeight);
+					// 执行第一层控制：姿态校准，传入实际高度
+					float actualHeight = tofHeightCm;  // 使用TOF测量的实际高度
+					bool attitudeNeedsAdjustment = !improvedHoverControlUpdate(&flowData, &tofData, &setpoint, &state, 0.002f, actualHeight);
 					
 					// 【第二层】条件运行：光流定点（仅在姿态不需要调整时运行）
 					if (!attitudeNeedsAdjustment) {
