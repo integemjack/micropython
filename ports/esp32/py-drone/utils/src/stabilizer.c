@@ -12,6 +12,7 @@
 #include "optical_flow.h"
 #include "vl53lxx.h"
 #include "hover_control.h"
+#include "hover_control_improved.h"  // 引入改进的悬停控制
 #include "maths.h"
 #include "ledseq.h"
 #include "sensfusion6.h"
@@ -89,6 +90,9 @@ void stabilizerInit(void)
 	hoverControlInit();		/* 悬停控制初始化 */
 	powerDistributionInit();		/*电机初始化*/
 
+	// 初始化改进的悬停控制
+	improvedHoverControlInit();
+	
 	// 单核模式下的优化策略：
 	// 稳定器任务保持高优先级，负责飞控核心逻辑
 	// 光流任务使用最低优先级，仅在系统空闲时运行
@@ -389,15 +393,38 @@ void stabilizerTask(void* param)
 
 		if (RATE_DO_EXECUTE(RATE_500_HZ, tick))
 		{
+			// 分层悬停控制：两步法
 			if (tofAvailable && tofData.distance > 0) {
 				float tofHeightCm = tofData.distance / 10.0f; // mm to cm
-				// TOF在近距离时权重更高
 				if (tofHeightCm >= 8.0f) {
-					if (!hoverControlIsActive()) {
-						hoverControlEnable(true); // 停止悬停控制
-						hoverControlSetTarget(state.position.x, state.position.y, setHeight);
+					
+					// 【第一层】始终运行：姿态校准（确保推力垂直）
+					if (!improvedHoverControlIsActive()) {
+						improvedHoverControlEnable(true);
+						ESP_LOGI("STABILIZER", "Layer 1: Attitude stabilization activated");
 					}
-					hoverControlUpdate(&flowData, &tofData, &setpoint, &state, 0.01f, setHeight);
+					
+					// 执行第一层控制：姿态校准，返回是否需要调整
+					bool attitudeNeedsAdjustment = !improvedHoverControlUpdate(&flowData, &tofData, &setpoint, &state, 0.002f, setHeight);
+					
+					// 【第二层】条件运行：光流定点（仅在姿态不需要调整时运行）
+					if (!attitudeNeedsAdjustment) {
+						// ✅ 姿态稳定，不需要调整 → 可以运行第二层光流控制
+						if (!hoverControlIsActive()) {
+							hoverControlEnable(true);
+							hoverControlSetTarget(state.position.x, state.position.y, setHeight);
+							ESP_LOGI("STABILIZER", "Layer 2: Optical flow activated (attitude stable)");
+						}
+						// 执行第二层控制：光流定点
+						hoverControlUpdate(&flowData, &tofData, &setpoint, &state, 0.002f, setHeight);
+					} else {
+						// ❌ 姿态需要调整 → 禁用第二层光流控制，专注姿态校准
+						if (hoverControlIsActive()) {
+							hoverControlEnable(false);
+							ESP_LOGW("STABILIZER", "Layer 2: Optical flow disabled (attitude adjusting)");
+						}
+						// 此时只有第一层在工作，专门做姿态校准
+					}
 				}
 			}
 		}

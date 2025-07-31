@@ -44,6 +44,7 @@
 #include "power_distribution.h"
 // 新增：引入 hover_control.h 头文件，用于悬停控制
 #include "hover_control.h"
+#include "hover_control_improved.h"
 
 static bool isOffse = 0;
 static ctrlVal_t wifiCtrl;
@@ -349,8 +350,27 @@ STATIC mp_obj_t read_cal_data(mp_obj_t self_in)
 //----------------------------------------------------------------------------------
 STATIC mp_obj_t drone_is_hover_active(mp_obj_t self_in)
 {
-	return mp_obj_new_bool(hoverControlIsActive());
+	return mp_obj_new_bool(improvedHoverControlIsActive());
 }STATIC MP_DEFINE_CONST_FUN_OBJ_1(drone_is_hover_active_obj, drone_is_hover_active);
+
+//----------------------------------------------------------------------------------
+// 新增：获取改进悬停控制的调试信息
+STATIC mp_obj_t drone_get_hover_debug(mp_obj_t self_in)
+{
+	mp_obj_t tuple[4];
+	float attComp[2] = {0.0f, 0.0f};    // 姿态补偿值 [roll, pitch]
+	float flowCorr[2] = {0.0f, 0.0f};   // 光流校正值 [x, y]
+	
+	// 获取调试信息
+	getHoverControlDebugInfo(attComp, flowCorr);
+	
+	tuple[0] = mp_obj_new_float(attComp[0]);   // 姿态补偿Roll (度)
+	tuple[1] = mp_obj_new_float(attComp[1]);   // 姿态补偿Pitch (度)
+	tuple[2] = mp_obj_new_float(flowCorr[0]);  // 光流校正X
+	tuple[3] = mp_obj_new_float(flowCorr[1]);  // 光流校正Y
+	
+	return mp_obj_new_tuple(4, tuple);
+}STATIC MP_DEFINE_CONST_FUN_OBJ_1(drone_get_hover_debug_obj, drone_get_hover_debug);
 
 //----------------------------------------------------------------------------------
 static void InitDrone(void)
@@ -428,6 +448,7 @@ STATIC const mp_rom_map_elem_t drone_locals_dict_table[] = {
 	{ MP_ROM_QSTR(MP_QSTR_read_motor_power), MP_ROM_PTR(&read_motor_power_obj) },
 	
 	{ MP_ROM_QSTR(MP_QSTR_is_hover_active), MP_ROM_PTR(&drone_is_hover_active_obj) },
+	{ MP_ROM_QSTR(MP_QSTR_get_hover_debug), MP_ROM_PTR(&drone_get_hover_debug_obj) },
 };
 STATIC MP_DEFINE_CONST_DICT(drone_drone_locals_dict,drone_locals_dict_table);
 
