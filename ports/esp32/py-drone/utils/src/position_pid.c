@@ -242,24 +242,25 @@ void positionController(float* thrust, attitude_t *attitude, setpoint_t *setpoin
 	
 	if (setpoint->mode.z == modeAbs)
 	{
-		float heightError = setpoint->position.z - state->position.z;
+		setpoint->velocity.z = 0.1f * pidUpdate(&pidZ, setpoint->position.z - state->position.z);
+		// float heightError = setpoint->position.z - state->position.z;
 		
-		// 修复：当接近目标高度时，降低速度设定值，实现平滑到达
-		float targetVelocity = pidUpdate(&pidZ, heightError);
+		// // 修复：当接近目标高度时，降低速度设定值，实现平滑到达
+		// float targetVelocity = pidUpdate(&pidZ, heightError);
 		
-		// 如果高度误差很小（±3cm内），设置很小的速度，基本悬停
-		if (fabsf(heightError) < 30.f) {  // 3cm内
-			targetVelocity *= 0.3f;  // 降低到30%的速度
-		} else if (fabsf(heightError) < 50.f) {  // 5cm内
-			targetVelocity *= 0.6f;  // 降低到60%的速度
-		}
+		// // 如果高度误差很小（±3cm内），设置很小的速度，基本悬停
+		// if (fabsf(heightError) < 30.f) {  // 3cm内
+		// 	targetVelocity *= 0.3f;  // 降低到30%的速度
+		// } else if (fabsf(heightError) < 50.f) {  // 5cm内
+		// 	targetVelocity *= 0.6f;  // 降低到60%的速度
+		// }
 		
-		// 修复：当高度误差非常小时，直接设置速度为0，实现精确悬停
-		if (fabsf(heightError) < 10.f) {  // 1cm内
-			targetVelocity = 0.0f;
-		}
+		// // 修复：当高度误差非常小时，直接设置速度为0，实现精确悬停
+		// if (fabsf(heightError) < 10.f) {  // 1cm内
+		// 	targetVelocity = 0.0f;
+		// }
 		
-		setpoint->velocity.z = targetVelocity;
+		// setpoint->velocity.z = targetVelocity;
 	}
 	
 	velocityController(thrust, attitude, setpoint, state);
