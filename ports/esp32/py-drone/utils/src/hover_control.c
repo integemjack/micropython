@@ -92,6 +92,25 @@ void hoverControlUpdate(flowMeasurement_t* flow, tofMeasurement_t* tof,
     if (!hoverState.enabled) {
         return;
     }
+
+    if (flow->dpixelx == 0 && flow->dpixely == 0) {
+        // No valid optical flow data, skip update
+        ESP_LOGW(TAG, "No valid optical flow data, skipping hover update");
+        return;
+    }
+
+    if (flow->dpixelx == 1876100 || flow->dpixely == 1876100) {
+        // Invalid optical flow data, skip update
+        ESP_LOGW(TAG, "Invalid optical flow data detected, skipping hover update");
+        return;
+    }
+
+    if (fabs(flow->dpixelx) < 5 || fabs(flow->dpixely) < 5) {
+        // Flow data too small, skip update
+        ESP_LOGW(TAG, "Optical flow data too small, skipping hover update");
+        return;
+    }
+    
     
     uint32_t currentTime = xTaskGetTickCount();
     
