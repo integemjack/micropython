@@ -391,7 +391,7 @@ void stabilizerTask(void* param)
 			powerDistribution(&control);
 		}
 
-		if (RATE_DO_EXECUTE(RATE_500_HZ, tick))
+		if (RATE_DO_EXECUTE(RATE_100_HZ, tick))
 		{
 			// 分层悬停控制：两步法
 			if (tofAvailable && tofData.distance > 0) {
@@ -409,23 +409,23 @@ void stabilizerTask(void* param)
 					bool attitudeNeedsAdjustment = !improvedHoverControlUpdate(&flowData, &tofData, &setpoint, &state, 0.002f, actualHeight);
 					
 					// 【第二层】条件运行：光流定点（仅在姿态不需要调整时运行）
-					if (!attitudeNeedsAdjustment) {
-						// ✅ 姿态稳定，不需要调整 → 可以运行第二层光流控制
-						if (!hoverControlIsActive()) {
-							hoverControlEnable(true);
-							hoverControlSetTarget(state.position.x, state.position.y, setHeight);
-							ESP_LOGI("STABILIZER", "Layer 2: Optical flow activated (attitude stable)");
-						}
-						// 执行第二层控制：光流定点
-						hoverControlUpdate(&flowData, &tofData, &setpoint, &state, 0.002f, setHeight);
-					} else {
-						// ❌ 姿态需要调整 → 禁用第二层光流控制，专注姿态校准
-						if (hoverControlIsActive()) {
-							hoverControlEnable(false);
-							ESP_LOGW("STABILIZER", "Layer 2: Optical flow disabled (attitude adjusting)");
-						}
-						// 此时只有第一层在工作，专门做姿态校准
-					}
+					// if (!attitudeNeedsAdjustment) {
+					// 	// ✅ 姿态稳定，不需要调整 → 可以运行第二层光流控制
+					// 	if (!hoverControlIsActive()) {
+					// 		hoverControlEnable(true);
+					// 		hoverControlSetTarget(state.position.x, state.position.y, setHeight);
+					// 		ESP_LOGI("STABILIZER", "Layer 2: Optical flow activated (attitude stable)");
+					// 	}
+					// 	// 执行第二层控制：光流定点
+					// 	hoverControlUpdate(&flowData, &tofData, &setpoint, &state, 0.002f, setHeight);
+					// } else {
+					// 	// ❌ 姿态需要调整 → 禁用第二层光流控制，专注姿态校准
+					// 	if (hoverControlIsActive()) {
+					// 		hoverControlEnable(false);
+					// 		ESP_LOGW("STABILIZER", "Layer 2: Optical flow disabled (attitude adjusting)");
+					// 	}
+					// 	// 此时只有第一层在工作，专门做姿态校准
+					// }
 				}
 			}
 		}
