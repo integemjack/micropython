@@ -8,6 +8,8 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "stabilizer.h"
+#include <math.h>
 
 static const char* TAG = "tof_sensor";
 
@@ -263,9 +265,30 @@ bool tofSensorReadMeasurement(tofMeasurement_t* tof)
         uint16_t sigma_raw = (data[9] << 8) | data[10];
         float sigma_mm = sigma_raw / 65536.0f; // Convert from 16.16 fixed point
         
+        // Get current attitude (pitch and roll) for compensation
+        attitude_t attitude;
+        getAttitudeData(&attitude);
+        
+        // Convert angles from degrees to radians for trigonometric functions
+        float pitch_rad = -attitude.pitch * M_PI / 180.0f;
+        float roll_rad = -attitude.roll * M_PI / 180.0f;
+        
+        // Calculate the effective tilt angle from vertical
+        // Using the approximation for small angles: cos(θ) ≈ 1 - (pitch² + roll²)/2
+        // For more accuracy, we can use: cos(θ) = cos(pitch) * cos(roll)
+        float cos_tilt = cosf(pitch_rad) * cosf(roll_rad);
+        
+        // Protect against division by zero or very small numbers
+        if (cos_tilt < 0.1f) {
+            cos_tilt = 0.1f;
+        }
+        
+        // Compensate for tilt: vertical distance = slant distance * cos(tilt)
+        float compensated_distance_mm = (float)distance_mm * cos_tilt;
+        
         // Get current timestamp
         tof->timestamp = xTaskGetTickCount() * portTICK_PERIOD_MS;
-        tof->distance = (float)distance_mm;
+        tof->distance = compensated_distance_mm;
         tof->stdDev = sigma_mm;
         
         return true;

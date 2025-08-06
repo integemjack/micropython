@@ -9,6 +9,8 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "sensors_mpu6050_spl06.h"
+#include "stabilizer.h"
+#include <math.h>
 
 static const char* TAG = "optical_flow";
 
@@ -110,9 +112,42 @@ bool opticalFlowReadMeasurement(flowMeasurement_t* flow)
         return false;
     }
     
+    // Get current attitude (pitch and roll) for compensation
+    attitude_t attitude;
+    getAttitudeData(&attitude);
+    
+    // Convert angles from degrees to radians for trigonometric functions
+    float pitch_rad = -attitude.pitch * M_PI / 180.0f;
+    float roll_rad = -attitude.roll * M_PI / 180.0f;
+    
+    // Apply pitch and roll compensation
+    // The optical flow sensor measures motion in the sensor frame, 
+    // but we want the motion in the world frame.
+    // When the drone is tilted, we need to compensate for this.
+    // The compensation accounts for both the scaling and rotation effects of tilt.
+    
+    // Calculate trigonometric values
+    float cos_pitch = cosf(pitch_rad);
+    float sin_pitch = sinf(pitch_rad);
+    float cos_roll = cosf(roll_rad);
+    float sin_roll = sinf(roll_rad);
+    
+    // Protect against division by zero or very small numbers
+    if (fabsf(cos_roll) < 0.05f) {
+        cos_roll = 0.05f * (cos_roll >= 0 ? 1 : -1);  // Limit to minimum 0.05
+    }
+    if (fabsf(cos_pitch) < 0.05f) {
+        cos_pitch = 0.05f * (cos_pitch >= 0 ? 1 : -1);  // Limit to minimum 0.05
+    }
+    
+    // Compensate for the tilt using a more accurate transformation
+    // This accounts for both the scaling and rotation effects of tilt
+    float compensated_delta_x = ((float)delta_x + (float)delta_y * sin_roll) / cos_roll;
+    float compensated_delta_y = ((float)delta_y - (float)delta_x * sin_pitch) / cos_pitch;
+    
     // Convert to flow measurement
-    flow->dpixelx = (float)delta_x;
-    flow->dpixely = (float)delta_y;
+    flow->dpixelx = compensated_delta_x;
+    flow->dpixely = compensated_delta_y;
     flow->dt = 0.004f; // 250Hz update rate
     
     // Set standard deviation (simplified)

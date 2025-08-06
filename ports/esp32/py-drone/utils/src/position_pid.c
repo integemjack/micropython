@@ -56,14 +56,17 @@ static void velocityController(float* thrust, attitude_t *attitude, setpoint_t *
 	static uint16_t altholdCount = 0;
 	
 	// 实现渐进式推力控制
-	static float baseThrust = 1000.0f;  // 基础推力，从1000开始
+	static float baseThrust = 50000.0f;  // 基础推力，从1000开始
+	static float onThrust = 0.0f;
+	static bool initOnThrust = false;
+	// static uint32_t delay = 10;
 	static uint32_t lastUpdateTime = 0;
 	
 	// 检查紧急停止状态
 	if (getCommanderEmerStop()) {
 		// 紧急停止时立即清零所有输出
 		*thrust = 0;
-		baseThrust = 1000.0f;  // 重置基础推力
+		baseThrust = 50000.0f;  // 重置基础推力
 		attitude->pitch = 0;
 		attitude->roll = 0;
 		return;
@@ -81,44 +84,43 @@ static void velocityController(float* thrust, attitude_t *attitude, setpoint_t *
 	rollOutputLpf += (rollOutput - rollOutputLpf) * 0.3f;  /*修复：Roll轴低通滤波，减少振荡*/
 	attitude->roll = rollOutputLpf;
 	
-	// 添加更新频率控制 - 每50ms更新一次推力(20Hz)，避免过于激进
-	uint32_t currentTime = xTaskGetTickCount();
-	if (currentTime - lastUpdateTime >= 50) {  // 50ms = 20Hz
-		lastUpdateTime = currentTime;
+	// // 添加更新频率控制 - 每50ms更新一次推力(20Hz)，避免过于激进
+	// uint32_t currentTime = xTaskGetTickCount();
+	//  // * 10.0f;  // 转换为 mm/s
+	// // uint32_t delay = fabs(currentVelZ) + 1;
+	// if (currentTime - lastUpdateTime >= 50) {  // 50ms = 20Hz
+	// 	lastUpdateTime = currentTime;
 		
 		// 计算高度误差
 		float currentHeight = state->position.z * 10.0f;  // 转换为mm
 		float targetHeight = getSetHeight() * 10.0f;  // 获取take_off()设置的目标高度并转换为mm
 		float heightError = targetHeight - currentHeight;  // 高度误差
+		float currentVelZ = state->velocity.z * 10;
 		
-		// 改进的推力控制策略 - 更平滑的调整
-		if (heightError > 200.0f) {
-			// 距离目标很远，增加推力
-			baseThrust += 800.0f;
-		} else if (heightError > 100.0f) {
-			// 距离目标较远，中等增加推力
-			baseThrust += 400.0f;
-		} else if (heightError > 50.0f) {
-			// 距离目标较近，小幅增加推力
-			baseThrust += 200.0f;
-		} else if (heightError < -200.0f) {
-			// 超过目标很多，大幅减少推力
-			baseThrust -= 800.0f;
-		} else if (heightError < -100.0f) {
-			// 超过目标较多，中等减少推力
-			baseThrust -= 400.0f;
-		} else if (heightError < -50.0f) {
-			// 超过目标较少，小幅减少推力
-			baseThrust -= 200.0f;
+		if (heightError > 0) {
+			if (currentVelZ <= 500.0f && currentVelZ <= heightError) {
+				baseThrust += heightError;
+			} else {
+				baseThrust -= heightError;
+			}
 		} else {
-			// 在目标高度附近(±50mm内)，保持当前推力不变，实现悬停
-			// baseThrust保持不变，避免推力为零
+			if (currentVelZ > -10.0f && currentVelZ > heightError) {
+				baseThrust += heightError;
+			} else {
+				baseThrust -= heightError;
+			}
 		}
-		
-		// 严格限制推力范围
-		if (baseThrust > 55000.0f) baseThrust = 55000.0f;
-		if (baseThrust < 18000.0f) baseThrust = 18000.0f;  // 提高最小推力到18000，确保能够维持悬停
-	}
+
+		// baseThrust += heightError;
+
+		// char debug_str[128];
+		// snprintf(debug_str, sizeof(debug_str), "DEBUG: baseThrust=%.1f, currentHeight=%.1f, targetHeight=%.1f, currentVelZ=%.1f\n", baseThrust, currentHeight, targetHeight, currentVelZ);
+		// debugpeintf(debug_str);
+
+
+
+		baseThrust = constrainf(baseThrust, 18000.0f, 55000.0f);
+	// }
 	
 	*thrust = baseThrust;
 	return;

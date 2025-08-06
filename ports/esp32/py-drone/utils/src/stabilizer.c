@@ -242,7 +242,7 @@ static void fastAdjustPosZ(void)
 	if (tofAvailable && tofData.distance > 0.0f)
 	{
 		// 将TOF距离转换为mm到cm单位 (TOF返回mm，setHeight使用cm)
-		float tofHeightCm = tofData.distance / 100.0f;
+		float tofHeightCm = tofData.distance / 10.0f;
 		
 		state.position.z = tofHeightCm;
 		
@@ -369,41 +369,49 @@ void stabilizerTask(void* param)
 			powerDistribution(&control);
 		}
 
-		if (RATE_DO_EXECUTE(RATE_100_HZ, tick))
+		if (RATE_DO_EXECUTE(RATE_10_HZ, tick))
 		{
 			// 分层悬停控制：两步法
 			if (tofAvailable && tofData.distance > 0) {
 				float tofHeightCm = tofData.distance / 10.0f; // mm to cm
 				if (tofHeightCm >= 8.0f) {
-					
-					// 【第一层】始终运行：姿态校准（确保推力垂直）
-					if (!improvedHoverControlIsActive()) {
-						improvedHoverControlEnable(true);
-						ESP_LOGI("STABILIZER", "Layer 1: Attitude stabilization activated");
+
+					if (!hoverControlIsActive()) { // && tofHeightCm >= setHeight
+						hoverControlEnable(true);
+						hoverControlSetTarget(state.position.x, state.position.y);
+						ESP_LOGI("STABILIZER", "Layer 2: Optical flow activated (attitude stable)");
 					}
+					// 执行第二层控制：光流定点
+					hoverControlUpdate(&flowData, &tofData, &setpoint, &state, 0.002f);
 					
-					// 执行第一层控制：姿态校准，传入实际高度
-					float actualHeight = tofHeightCm;  // 使用TOF测量的实际高度
-					bool attitudeNeedsAdjustment = !improvedHoverControlUpdate(&flowData, &tofData, &setpoint, &state, 0.002f, actualHeight);
+					// // 【第一层】始终运行：姿态校准（确保推力垂直）
+					// if (!improvedHoverControlIsActive()) {
+					// 	improvedHoverControlEnable(true);
+					// 	ESP_LOGI("STABILIZER", "Layer 1: Attitude stabilization activated");
+					// }
 					
-					// 【第二层】条件运行：光流定点（仅在姿态不需要调整时运行）
-					if (!attitudeNeedsAdjustment) {
-						// ✅ 姿态稳定，不需要调整 → 可以运行第二层光流控制
-						if (!hoverControlIsActive()) {
-							hoverControlEnable(true);
-							hoverControlSetTarget(state.position.x, state.position.y, setHeight);
-							ESP_LOGI("STABILIZER", "Layer 2: Optical flow activated (attitude stable)");
-						}
-						// 执行第二层控制：光流定点
-						hoverControlUpdate(&flowData, &tofData, &setpoint, &state, 0.002f, setHeight);
-					} else {
-						// ❌ 姿态需要调整 → 禁用第二层光流控制，专注姿态校准
-						if (hoverControlIsActive()) {
-							hoverControlEnable(false);
-							ESP_LOGW("STABILIZER", "Layer 2: Optical flow disabled (attitude adjusting)");
-						}
-						// 此时只有第一层在工作，专门做姿态校准
-					}
+					// // 执行第一层控制：姿态校准，传入实际高度
+					// float actualHeight = tofHeightCm;  // 使用TOF测量的实际高度
+					// bool attitudeNeedsAdjustment = !improvedHoverControlUpdate(&flowData, &tofData, &setpoint, &state, 0.002f, actualHeight);
+					
+					// // 【第二层】条件运行：光流定点（仅在姿态不需要调整时运行）
+					// if (!attitudeNeedsAdjustment) {
+					// 	// ✅ 姿态稳定，不需要调整 → 可以运行第二层光流控制
+					// 	if (!hoverControlIsActive()) { // && tofHeightCm >= setHeight
+					// 		hoverControlEnable(true);
+					// 		hoverControlSetTarget(state.position.x, state.position.y);
+					// 		ESP_LOGI("STABILIZER", "Layer 2: Optical flow activated (attitude stable)");
+					// 	}
+					// 	// 执行第二层控制：光流定点
+					// 	hoverControlUpdate(&flowData, &tofData, &setpoint, &state, 0.002f);
+					// } else {
+					// 	// ❌ 姿态需要调整 → 禁用第二层光流控制，专注姿态校准
+					// 	if (hoverControlIsActive()) {
+					// 		hoverControlEnable(false);
+					// 		ESP_LOGW("STABILIZER", "Layer 2: Optical flow disabled (attitude adjusting)");
+					// 	}
+					// 	// 此时只有第一层在工作，专门做姿态校准
+					// }
 				}
 			}
 		}

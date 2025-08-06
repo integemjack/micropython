@@ -55,7 +55,7 @@ void hoverControlEnable(bool enable);
  * @param y Target Y position (cm) 
  * @param height Target height (cm)
  */
-void hoverControlSetTarget(float x, float y, float height);
+void hoverControlSetTarget(float x, float y);
 
 /**
  * Main hover control update function
@@ -67,7 +67,7 @@ void hoverControlSetTarget(float x, float y, float height);
  * @param height Backup height input (cm)
  */
 void hoverControlUpdate(flowMeasurement_t* flow, tofMeasurement_t* tof, 
-                       setpoint_t* setpoint, state_t* state, float dt, float height);
+                       setpoint_t* setpoint, state_t* state, float dt);
 
 /**
  * Reset hover control state

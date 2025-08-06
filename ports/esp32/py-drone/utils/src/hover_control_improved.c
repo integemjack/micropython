@@ -189,7 +189,7 @@ bool performAttitudeStabilization(attitude_t* attitude, setpoint_t* setpoint, fl
     }
     
     // 0. 更新高度自适应增益
-    updateHeightBasedGain(height);
+    // updateHeightBasedGain(height);
     
     // 1. 多级姿态角滤波（更强的平滑效果）
     // 一级滤波：快速响应
@@ -243,10 +243,21 @@ bool performAttitudeStabilization(attitude_t* attitude, setpoint_t* setpoint, fl
     attitudeState.compensationPitch = constrainf(attitudeState.compensationPitch, 
                                                -MAX_ATTITUDE_COMPENSATION, 
                                                MAX_ATTITUDE_COMPENSATION);
+
+    attitudeState.compensationRoll += 2.5f;
+    attitudeState.compensationPitch += -0.7f;
     
+    // char debug_str[80];
+    // snprintf(debug_str, sizeof(debug_str), "DEBUG: roll=%.1f, pitch=%.1f, compensationRoll=%.1f, compensationPitch=%.1f\n", setpoint->attitude.roll, setpoint->attitude.pitch, attitudeState.compensationRoll, attitudeState.compensationPitch);
+    // debugpeintf(debug_str);
+
     // 4. 应用姿态补偿到控制输出
-    setpoint->attitude.roll += attitudeState.compensationRoll;
-    setpoint->attitude.pitch += attitudeState.compensationPitch;
+    // if (fabs(attitudeState.compensationRoll) >= 0.5f) {
+        setpoint->attitude.roll += attitudeState.compensationRoll;
+    // }
+    // if (fabs(attitudeState.compensationPitch) >= 0.5f) {
+        setpoint->attitude.pitch += attitudeState.compensationPitch;
+    // }
     
     // 5. 优化的稳定性判断（更保守的策略）
     float totalAttitudeError = fabsf(attitudeState.smoothedRoll) + fabsf(attitudeState.smoothedPitch);
@@ -261,10 +272,11 @@ bool performAttitudeStabilization(attitude_t* attitude, setpoint_t* setpoint, fl
         attitudeState.stableCounter++;
         attitudeState.unstableCounter = 0;
         
-        // 更严格的稳定要求：连续25个周期才认为稳定
-        if (attitudeState.stableCounter >= 25) {
+        // 更严格的稳定要求：连续5个周期才认为稳定
+        // if (attitudeState.stableCounter >= 5) {
             attitudeState.attitudeStable = true;
-        }
+            // debugpeintf("DEBUG: system is ok.");
+        // }
     } else {
         attitudeState.unstableCounter++;
         attitudeState.stableCounter = 0;
@@ -274,15 +286,15 @@ bool performAttitudeStabilization(attitude_t* attitude, setpoint_t* setpoint, fl
     }
     
     // 6. 增强的调试输出
-    static uint32_t debugCounter = 0;
-    if (++debugCounter % 250 == 0) { // 每0.5秒输出一次
-        ESP_LOGD(TAG, "Layer1: H=%.0fcm Gain=%.3f Att(R=%.2f°,P=%.2f°) Comp(R=%.2f°,P=%.2f°) Osc=%s Status=%s", 
-                 attitudeState.currentHeight, attitudeState.heightBasedGain,
-                 attitudeState.smoothedRoll, attitudeState.smoothedPitch,
-                 attitudeState.compensationRoll, attitudeState.compensationPitch,
-                 attitudeState.oscillationDetected ? "YES" : "NO",
-                 attitudeState.attitudeStable ? "STABLE" : "ADJUSTING");
-    }
+    // static uint32_t debugCounter = 0;
+    // if (++debugCounter % 250 == 0) { // 每0.5秒输出一次
+    //     ESP_LOGD(TAG, "Layer1: H=%.0fcm Gain=%.3f Att(R=%.2f°,P=%.2f°) Comp(R=%.2f°,P=%.2f°) Osc=%s Status=%s", 
+    //              attitudeState.currentHeight, attitudeState.heightBasedGain,
+    //              attitudeState.smoothedRoll, attitudeState.smoothedPitch,
+    //              attitudeState.compensationRoll, attitudeState.compensationPitch,
+    //              attitudeState.oscillationDetected ? "YES" : "NO",
+    //              attitudeState.attitudeStable ? "STABLE" : "ADJUSTING");
+    // }
     
     // 返回姿态是否稳定（决定是否启用第二层控制）
     return attitudeState.attitudeStable;
