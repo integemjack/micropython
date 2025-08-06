@@ -113,6 +113,12 @@ void hoverControlUpdate(flowMeasurement_t* flow, tofMeasurement_t* tof,
         ESP_LOGW(TAG, "Optical flow data too small, skipping hover update");
         return;
     }
+
+    if (fabs(flow->dpixelx) <= 5 || fabs(flow->dpixely) <= 5) {
+        // Flow data too small, skip update
+        ESP_LOGW(TAG, "Optical flow data too small, skipping hover update");
+        return;
+    }
     
     
     uint32_t currentTime = xTaskGetTickCount();
@@ -147,8 +153,8 @@ void hoverControlUpdate(flowMeasurement_t* flow, tofMeasurement_t* tof,
     // float errorZ = hoverState.targetHeight - hoverState.currentHeight;
     
     // Update velocity setpoints using PID controllers
-    float velCmdX = 0.6f * pidUpdate(&hoverPidX, errorX);
-    float velCmdY = 0.6f * pidUpdate(&hoverPidY, errorY);
+    float velCmdX = 1.2f * pidUpdate(&hoverPidX, errorX);
+    float velCmdY = 1.2f * pidUpdate(&hoverPidY, errorY);
     
     // Z-axis PID control - output is vertical velocity command
     // float velCmdZ = 0.0f;

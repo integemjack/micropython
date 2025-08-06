@@ -65,10 +65,6 @@ void readOpticalFlowSensor(void)
     // 安全读取光流传感器数据
     if (opticalFlowIsPresent()) {
         flowAvailable = opticalFlowReadMeasurement(&flowData);
-        // if (!flowAvailable) {
-        //     // 如果读取失败，清零数据
-        //     memset(&flowData, 0, sizeof(flowData));
-        // }
     }
 }
 
@@ -76,6 +72,18 @@ void readTofSensor(void)
 {
     if (tofSensorIsPresent()) {
         tofAvailable = tofSensorReadMeasurement(&tofData);
+		
+		if (tofAvailable) {
+			// 将TOF距离转换为mm到cm单位 (TOF返回mm，setHeight使用cm)
+			float tofHeightCm = tofData.distance / 10.0f;
+			
+			state.position.z = tofHeightCm;
+			
+			// 设置为位置绝对模式（不是速度模式）
+			setpoint.mode.z = modeAbs;          // 位置绝对控制模式
+			setpoint.position.z = setHeight;    // 目标高度位置
+			// setpoint.velocity.z = 0.0f;         // 目标速度为0（悬停）
+		}
     }
 }
 
@@ -241,15 +249,15 @@ static void fastAdjustPosZ(void)
 	// 如果TOF传感器可用，使用TOF数据进行高度控制
 	if (tofAvailable && tofData.distance > 0.0f)
 	{
-		// 将TOF距离转换为mm到cm单位 (TOF返回mm，setHeight使用cm)
-		float tofHeightCm = tofData.distance / 10.0f;
+		// // 将TOF距离转换为mm到cm单位 (TOF返回mm，setHeight使用cm)
+		// float tofHeightCm = tofData.distance / 10.0f;
 		
-		state.position.z = tofHeightCm;
+		// state.position.z = tofHeightCm;
 		
-		// 设置为位置绝对模式（不是速度模式）
-		setpoint.mode.z = modeAbs;          // 位置绝对控制模式
-		setpoint.position.z = setHeight;    // 目标高度位置
-		// setpoint.velocity.z = 0.0f;         // 目标速度为0（悬停）
+		// // 设置为位置绝对模式（不是速度模式）
+		// setpoint.mode.z = modeAbs;          // 位置绝对控制模式
+		// setpoint.position.z = setHeight;    // 目标高度位置
+		// // setpoint.velocity.z = 0.0f;         // 目标速度为0（悬停）
     }
 	else 
 	if(velModeTimes > 0)
@@ -268,17 +276,13 @@ static void fastAdjustPosZ(void)
 		if(velModeTimes == 0)
 		{
 			// 检查是否在起飞状态，如果是则不要覆盖目标高度
-			if (!getCommanderKeyFlight()) {
-				char debug_str[100];
-				snprintf(debug_str, sizeof(debug_str), "DEBUG: velModeTimes=0, changing setHeight from %.1f to %.1f cm\n", 
-						 setHeight, state.position.z);
-				debugpeintf(debug_str);
-				setHeight = state.position.z;
-			} else {
-				char debug_str[80];
-				snprintf(debug_str, sizeof(debug_str), "DEBUG: velModeTimes=0 but in flight, keeping setHeight=%.1f cm\n", setHeight);
-				debugpeintf(debug_str);
-			}
+			// if (!getCommanderKeyFlight()) {
+			// 	// char debug_str[100];
+			// 	// snprintf(debug_str, sizeof(debug_str), "DEBUG: velModeTimes=0, changing setHeight from %.1f to %.1f cm\n", 
+			// 	// 		 setHeight, state.position.z);
+			// 	// debugpeintf(debug_str);
+			// 	setHeight = state.position.z;
+			// }
 		}		
 	}
 	else if(absModeTimes > 0)
