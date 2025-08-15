@@ -99,7 +99,7 @@ void stabilizerInit(void)
 	powerDistributionInit();		/*电机初始化*/
 
 	// 初始化改进的悬停控制
-	improvedHoverControlInit();
+	// improvedHoverControlInit();
 	
 	// 单核模式下的优化策略：
 	// 稳定器任务保持高优先级，负责飞控核心逻辑

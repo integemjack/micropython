@@ -146,8 +146,9 @@ static bool vl53l1x_init(void) {
         return false;
     }
     
-    if (model_id != 0xEACC) {
-        ESP_LOGE(TAG, "VL53L1X model ID mismatch: expected 0xEACC, got 0x%04X", model_id);
+    // 仅校验高字节等于期望ID(0xEA)，低字节为修订号，可能不同
+    if ((uint8_t)(model_id >> 8) != VL53L1X_EXPECTED_ID) {
+        ESP_LOGE(TAG, "VL53L1X model ID mismatch: expected 0x%02X**, got 0x%04X", VL53L1X_EXPECTED_ID, model_id);
         return false;
     }
     
@@ -194,7 +195,8 @@ static bool testSensorPresence(void)
     // Try VL53L1X (different register layout) - 使用专用TOF I2C总线
     uint16_t modelId = 0;
     if (readReg16_16(VL53L1X_IDENTIFICATION__MODEL_ID, &modelId)) {
-        if (modelId == 0xEACC) {
+        // 仅检查高字节等于 0xEA，低字节是版本号
+        if ((uint8_t)(modelId >> 8) == VL53L1X_EXPECTED_ID) {
             ESP_LOGI(TAG, "VL53L1X TOF sensor detected (Model ID: 0x%04X)", modelId);
             isVL53L1X = true;
             return true;
